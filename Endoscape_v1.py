@@ -2,7 +2,10 @@
 #------DESCRIPTION------#
 #---------------------#
 '''The following version of Endoscape predicts thermoregulatory requirements
-for small mammals and birds'''
+for small mammals and birds. The script requires a few files to run. The first
+file is endotherm_properties.csv, which contains the species-specific traits
+required to make the calculations. The simulation also requires a database of sites
+and the site-specific dataframes for each site.'''
 
 #---------------------#
 #------LIBRARIES------#
@@ -127,45 +130,57 @@ class Individual():
         self.soil_depth = soil_depth
     
     def orbit_correction(self,day):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         return 1 + 2 * 0.01675 * math.cos((((2*math.pi)/365))*day)
     
     def direct_solar_radiation(self,day):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         return self.orbit_correction(day)*SOLAR_CONSTANT
         
     def f(self,day):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         return 279.575 + (0.9856 * day)
     
     def ET(self,day):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         _f = math.radians(self.f(day))
         return (-104.7*math.sin(_f)+596.2*math.sin(2*_f)+4.3*math.sin(3*_f)-12.7*math.sin(4*_f)-429.3*math.cos(_f)-2.0*math.cos(2*_f)+19.3*math.cos(3*_f))/3600.
     
     def LC(self,lon):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         return ((lon%15)*4.0)/60
 
     def t0(self,lc,et):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         t = 12 + lc - et
         return t
 
     def hour(self,t,t_zero):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         h = 15*(t-t_zero)
         return h
 
     def declin(self,day):
+        'a function that calculates the declination angle'
         return math.degrees(math.asin(0.39785* math.sin(math.radians(278.97 + 0.9856 * day + 1.9165 * math.sin(math.radians(356.6 + 0.9856 * day))))))
         
     def zenith(self,day,t):
+        'a function that calculates the zenith angle'
         if math.acos(math.sin(math.radians(self.latitude))*math.sin(math.radians(self.declin(day))) + math.cos(math.radians(self.latitude))*math.cos(math.radians(self.declin(day)))*math.cos(math.radians(self.hour(t,(self.t0(self.LC(self.longitude),self.ET(day))))))) >= 0.:
             return math.acos(math.sin(math.radians(self.latitude))*math.sin(math.radians(self.declin(day))) + math.cos(math.radians(self.latitude))*math.cos(math.radians(self.declin(day)))*math.cos(math.radians(self.hour(t,(self.t0(self.LC(self.longitude),self.ET(day)))))))
         else:
             return 0.
             
     def azimuth(self,day,t):
+        'a function that calculates the azimuth angle'
         return (math.acos(-1.*(-(math.sin(math.radians(self.declin(day)))-(math.cos(self.zenith(day,t))*math.sin(math.radians(self.latitude)))))/((math.cos(math.radians(self.latitude)))*math.sin(self.zenith(day,t)))))
         
     def animal_angle(self,day,t):
+        'a function that calculates the angle of the animal related to the sun'
         return (math.acos((math.cos(math.radians(self.animal_slope)) * math.cos(self.zenith(day,t))) + (math.sin(math.radians(self.animal_slope)) * math.sin(self.zenith(day,t)) * math.cos(self.azimuth(day,t)-math.radians(180.- self.animal_slope)))))
             
     def m(self,day,hrs):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         p_a = 101.3*math.exp(-self.altitude/8200)
         if math.cos(self.zenith(day,hrs))>=0.:
             return p_a/(101.3*(math.cos(self.zenith(day,hrs))))
@@ -173,6 +188,7 @@ class Individual():
             return 0.
             
     def hS0(self,day,hrs):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         z = self.zenith(day,hrs)
         if math.cos(z)>= 0.:
             return self.direct_solar_radiation(day)*(math.cos(z))
@@ -180,27 +196,25 @@ class Individual():
             return 0.
             
     def hS(self,day, hrs, tau):
+        'a function required to estimate solar radiation from Campbell and Norman (2010)'
         self.daylight = self.hS0(day,hrs)*tau**self.m(day,hrs)
         return self.hS0(day,hrs)*tau**self.m(day,hrs)
 
     def diffuse_solar(self,day,hrs,tau):
+        'a function for diffuse solar radiation'
         return self.hS0(day,hrs)*0.3*(1.-(TAU**self.m(day,hrs)))
 
     def reflected_radiation(self,day,t,tau):
+        'a function for reflected solar radiation'
         return ALBEDO*self.hS(day,t,tau)
-               
-    def view_factor_hemisphere_cylinder(self,zenith):
-        return (1.+((4.*(self.H)*math.sin(math.radians(90.-math.degrees(zenith))))/(math.pi*(self.D))))/(4.+(4.*(self.H)/(self.D)))
-    
+
     def view_factor_prolate_spheroid(self,animal_angle,a,b):
+        'a function for view factor for a proloate spheroid'
         view_factor = ((math.sqrt(1+((((b/a)**2)-1)*((math.cos(math.radians(90.-math.degrees(animal_angle))))**2))))/((2*(b/a))+((2*(math.asin(math.sqrt((1-((b/a)**2))))))/(math.sqrt((1-((b/a)**2)))))))
         return view_factor + (view_factor * self.orientation)
-
-    def dimensionless_temperature(self,hour):
-        return 0.44-(0.46*math.sin(((math.pi/12.)*hour)+0.9))+0.11*math.sin(2.*(math.pi/12.)*hour+0.9)
     
     def air_temp(self,mins,maxes,day,hour):
-        'This function grad air temperature data for birds from NicheMapR output files'
+        'a function grabs air temperature data for birds from NicheMapR output files'
         if self.scenario =='historic':
             self.Tref = self.historic_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
         elif self.scenario == 'modern':
@@ -208,7 +222,7 @@ class Individual():
         return(self.Tref)
 
     def ground_temp(self,day,hour):
-        'This function grabs data from NicheMapR and is used exclusively for longwave radiation from the ground for mammals'
+        'a function grabs data from NicheMapR and is used exclusively for longwave radiation from the ground for mammals'
         self.Tref = 0.0
         if self.type == 'mammal':
             if self.soil_ref == 'above':
@@ -254,6 +268,7 @@ class Individual():
         return self.Tref
                 
     def ground_temp_NicheMapR(self,day,hour):
+        'a function that grabs temperatures from NicheMapR output files'
         self.Tref = 0.0
         if self.type == 'mammal':
             if self.soil_ref == 'above':
@@ -302,24 +317,17 @@ class Individual():
             elif self.scenario == 'modern':
                         self.Tref = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
         return self.Tref
-        
-    def ground_temp_depth(self,mins,maxes,day,hour,depth):
-        return self.temp_average(mins,maxes,day) + 10 * math.exp(-depth/10.0)*math.sin(((math.pi/12)*(hour-8))-depth/10.0)
-
-    def temp_average(self,mins,maxes,day):
-        T_ave = []
-        for i in range(14):
-            for j in range(24):
-                T_ave.append(self.air_temp(mins,maxes,day-i,j))
-        return numpy.mean(T_ave)
 
     def longwave_sky(self,temperature):
+        'a function for long wave radiation from the sky'
         return 53.1*10**-14*(temperature+273.15)**6.
 
     def longwave_ground(self,temperature):
+        'a function for long wave radiation from the ground'
         return E_G*STEFAN_BOLTZMANN*(temperature+273.15)**4.
             
     def radiative_conductance(self,mins,maxes,day,hour,soil_mins,soil_maxes):
+        'a function for radiative conductance'
         if self.type == "bird":
             return (4.0 * (self.surface_area_outer/2.0) * STEFAN_BOLTZMANN * self.E_S * ((self.air_temp(mins,maxes,day,hour)+273.15)**3.)) #Bakken, for bird, divided by half for 2D heat flow
         elif self.type == "mammal":
@@ -328,6 +336,7 @@ class Individual():
             print("Warning: incorrect endotherm type")
     
     def convective_conductance(self,mins,maxes,day,hour,soil_mins,soil_maxes,windspeed):
+        'a function for convective conductance'
         if self.type == "bird":
             air_pressure = (101325.*(1.-(2.2569*10**-5)*self.altitude)**5.2553)
             temp_K = self.air_temp(mins,maxes,day,hour) + 273.15
@@ -354,9 +363,11 @@ class Individual():
             print("Warning: incorrect endotherm type in convective conductance")
             
     def probability(self,day,time):
+        'a function calculates the propability that a ray of sunlight passes through the insulation to hit the skin directly'
         return (self.density_of_fibers * 10000.) * 0.00003 * ((((1. + (math.tan(numpy.arccos(self.insulation_depth_dorsal/self.insulation_length_dorsal))**2.))*(1. + (math.tan(self.animal_angle(day,time))**2.)))-((1.+ math.tan(numpy.arccos(self.insulation_depth_dorsal/self.insulation_length_dorsal))*math.tan(self.animal_angle(day,time))*math.cos(self.azimuth(day,time)))**2.))**(1./2.))
     
     def radiation_abs(self,area,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
+        'a function calculates the total amount of absorbed radiation'
         if area == "dorsal" and self.type == "bird":
                 return ((self.S*(self.A_S_dorsal + ((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed)+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))/(self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_dorsal)) * (2.-self.A_S_dorsal)))*((self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS0(day,hour))+((self.diffuse_solar(day,hour,tau)))))+(self.A_L*((self.longwave_sky(self.air_temp(mins,maxes,day,hour)))))
         elif area == "dorsal" and self.type == "mammal":
@@ -375,6 +386,7 @@ class Individual():
             print("Warning in radiation absorbed")
   
     def effective_conductance(self,area,radiative_conductance, convective_conductance):
+        'a function for effective conductance'
         if area == "dorsal":
             self.Ke_d = (self.conductance_skin_insulation_dorsal*(radiative_conductance + (convective_conductance)))/(self.conductance_skin_insulation_dorsal + radiative_conductance + convective_conductance)
             return(self.Ke_d)
@@ -384,12 +396,13 @@ class Individual():
             print("Warning in effective conductance")
             
     def Ke_overall(self,mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed):
+        'a function for total effective conductance'
         field_dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
         field_ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
         return field_dorsal_conductance + field_ventral_conductance
 
     def Q_gen(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed):
-        'this Qgen calculates dorsal and ventral sides independently and then adds them'
+        'a function calculates dorsal and ventral net sensible heat flux from both sides independently and then adds them together'
         if self.type == "bird":
             dorsal_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
             ventral_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
@@ -419,6 +432,7 @@ class Individual():
         return Qgen_dorsal + Qgen_ventral
         
     def operative_temperature(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
+        'a function for operative temperature'
         if self.type == "bird":
             self.dorsal_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
             ventral_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
@@ -437,6 +451,7 @@ class Individual():
             print("Error in operative temperature")
     
     def standard_operative_temperature(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed):
+        'a function for standard operative temperature'
         dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
         ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
         standard_overall_conductance = dorsal_conductance + ventral_conductance
@@ -447,6 +462,7 @@ class Individual():
         return self.T_b - relative_conductance*(self.T_b - self.operative_temperature(mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed))
         
     def update_skin_conductance(self,Tes):
+        'a function that adjusts the skin conductance based on operative temperature'
         if Tes <= self.lower_critical_temperature:
             self.conductivity_skin = 0.204
         elif Tes >= self.upper_critical_temperature:
@@ -458,6 +474,7 @@ class Individual():
         self.conductance_skin_insulation_ventral = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))
     
     def update_Tb(self,Tes,Tb_max):
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         if Tes <= 30.0:
             self.T_b  = (self.Tb_slope1 * 30.) + (self.Tb_slope2 * (30.0**2)) + self.Tb_intercept
         elif Tes > 30 and Tes <= 55:
@@ -468,13 +485,14 @@ class Individual():
             self.T_b = Tb_max
             
     def update_water_loss_rate(self,Tes):#2.41 J mg^-1;rates are g/hour
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         if Tes <= 30.0:
             self.evaporative_heat_loss = (self.water_loss_intercept*math.exp((self.water_loss_slope*30.)))/1000.
         elif Tes > 30:
             self.evaporative_heat_loss = (self.water_loss_intercept*math.exp((self.water_loss_slope*Tes)))/1000.
             
     def update_water_heat_ratio(self,Tes):
-        #used to calculate metabolic heat production
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         if Tes <= 30.0:
             self.water_heat_ratio = self.water_heat_ratio_intercept*math.exp((self.water_heat_ratio_slope*30.0))
         elif Tes > 30:
@@ -482,9 +500,11 @@ class Individual():
         self.resting_metabolic_rate = self.evaporative_heat_loss/self.water_heat_ratio
             
     def update_water_heat_balance(self):
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         self.water_heat_balance = self.evaporative_heat_loss - self.resting_metabolic_rate
             
     def update_energy_balance(self,Qgen):
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         self.energy_balance = Qgen + self.water_heat_balance
         if self.energy_balance > 0.0 and Qgen < 0.0:#if you're losing heat because water loss rates exceed heat gained and it's hot outside
             self.water_loss_mass = (((self.evaporative_heat_loss)/2.41)*3600)/1000.
@@ -534,9 +554,11 @@ class Individual():
             print('Error: update energy balance function -> Qgen equals energy balance')
             
     def calculate_empirical_body_conductance(self,Te):
+        'a function is only used if physiological sensitivities are known, not used for the publication'
         return (self.resting_metabolic_rate - self.evaporative_heat_loss)/(self.T_b - Te)
         
     def biophysical_demand(self,Qgen):
+        'a function for converting net sensible heat flux'
         if Qgen < 0:
             self.Qgen_water = Qgen * 3600.
             self.Qgen_water_sum += Qgen
@@ -546,17 +568,9 @@ class Individual():
             self.Qgen_water = 0.0
         else:
             print('Error: biophysical demand function -> Qgen equals zero')
-
-    def body_temperature(self,mins,maxes,day,hour,tau,air_temperature,ground_temperature,initial_Tb):
-        T_e = self.operative_temperature(mins,maxes,DAY,hour,TAU,air_temperature,ground_temperature)
-        if T_e >= initial_Tb:
-            tau = math.exp(0.72+0.36*math.log(self.MASS))
-            self.T_b = (math.exp(-1./tau) * (initial_Tb - T_e) + T_e)
-        if T_e < initial_Tb:
-            tau = math.exp(0.42+0.44*math.log(self.MASS))
-            self.T_b = (math.exp(-1./tau) * (initial_Tb - T_e) + T_e)
             
     def define_Tes_past(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
+        'a function finds the standard operative temperature in the previous hour'
         if self.physiology_known == 1.0:
             if hour == 0.0:
                 self.Tes_past = self.standard_operative_temperature(mins,maxes,day-1.,23.,tau,soil_mins,soil_maxes,windspeed)
@@ -571,6 +585,7 @@ class Individual():
                 pass
             
     def activity_thermal_stress(self,Tes_current,Tes_previous,species,hour):
+        'a function that restricts activity based on body temperature, not used for publication'
         self.activity_above_thermal_stress = 0.0
         if Tes_previous > self.Tb_max and Tes_current > self.Tb_max:
             self.activity_above_thermal_stress = 1.0
@@ -591,6 +606,7 @@ class Individual():
             print(species)
         
     def activity_water_stress(self,Tes_current,Tes_previous,Qgen_past,hour):
+        'a function that restricts activity based on water balance, not used for publication'
         self.activity_above_water_stress = 0.0
         if Tes_previous <= 30.0:
             previous_water_heat_ratio = self.water_heat_ratio_intercept*math.exp((self.water_heat_ratio_slope*30.0))
@@ -612,6 +628,7 @@ class Individual():
             pass
             
     def seek_shade(self,air_temperature,ground_temperature,T_threshold,mins,maxes,day,hour,tau):
+        'a function determines where and when birds and small mammals seek microhabitats based on environmental conditions'
         self.hS(day,hour,tau)
         if self.scenario == 'modern':
                 ground_temperature = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
@@ -725,6 +742,7 @@ class Individual():
                     self.S = 0.0
                                             
     def find_sun(self,day,hour,tau,sun_state):
+        'a function that determines whether the sun has risen or set'
         times = numpy.arange(hour-1,hour+0.01,0.01)
         for i in range(len(times)):
             sun = self.hS(day,times[i],tau)
@@ -740,6 +758,7 @@ class Individual():
 #-----------------------------#
 
 def generate_mass(mass):
+    'a function can be used to assess the sensitivity of the results to mass'
     mass_change =  random.array((random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100))
     masses = itertools.repeat(mass,15)
     mass_list = masses-(masses*mass_change)
@@ -749,11 +768,13 @@ def generate_mass(mass):
     return mass_list,change
 
 def generate_seek():
+    'a function can be used to assess the sensitivity of the results to the temperature at which the animal seeks microhabitats'
     seek_temperatures =  numpy.array((random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30)))
     seek_temperatures = numpy.insert(seek_temperatures,0,35.0)
     return list(seek_temperatures)
     
 def read_microclimates(Tsoil):
+        'a function reads csv files that are the outputs of NicheMapR'
         soil_df = pandas.DataFrame()
         list_of_Tsoil = glob.glob(Tsoil+str('*csv'))
         for i in range(len(list_of_Tsoil)):
@@ -771,11 +792,11 @@ def read_microclimates(Tsoil):
 #--------------#
 #  DATAFRAMES  #
 #--------------#
-
-species = pandas.read_csv('dataset/endotherm_properties.csv')
-locations = pandas.read_csv('dataset/mammal_sites.csv')
-modern_soils = read_microclimates('dataset/soil/modern_shade50/')
-historic_soils = read_microclimates('dataset/soil/historic_shade50/')
+'See code description above for explanation'
+species = pandas.read_csv('path/endotherm_properties.csv')
+locations = pandas.read_csv('path/mammal_sites.csv')
+modern_soils = read_microclimates('path/modern_shade50/')
+historic_soils = read_microclimates('path/historic_shade50/')
 
 
 #-----------------#
@@ -783,6 +804,7 @@ historic_soils = read_microclimates('dataset/soil/historic_shade50/')
 #-----------------#
 
 def run_endotherm(site):
+        'a function that coordinates with the other functions to run the full simulation'
         hourly_results = pandas.DataFrame(columns = ['type','species','activity_pattern','site','version','climate_scenario','mass_change','seek_temperature','wind','posture','fiber_density','shade','feather_depths','orientation','shape','physiology_known', 'significant', 'elevational_preference','habitat','diet','migratory','mass','surface_area','occupancy_decline','julian_day','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_empirical','Ke_theoretical','Tb','Qgen','EHL','MHP','EHL/MHP','energy_balance','water_loss_mass','dehydration_mass','excess_proportion_of_mass_lost','excess_water','metabolic_heat_required','water_loss_required','proportion_water_loss_required','excess_metabolic_heat','Qgen_water_avg','Qgen_water_sum','Qgen_heat_avg','Qgen_heat_sum','activity_thermal_stress','activity_water_stress','water_stress','heat_stress','hr_restriction'])
         windspeeds = [0.1]#[0.1,1.0,2.0,3.0]
         posture = [0.0]#for azimuth function, [-0.5,-0.25,0.0,0.25,0.5]
@@ -854,7 +876,9 @@ def run_endotherm(site):
                                                             hourly_results = hourly_results.append(dataframe)
         hourly_results.to_csv('species_output/mammal_v6_shade50/hourly_v5_standard_site'+str(site+1)+'.csv',columns=['type','species','activity_pattern','site','version','climate_scenario','mass_change','seek_temperature','wind','posture','fiber_density','shade','feather_depths','orientation','shape','physiology_known','mass','surface_area','julian_day','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_empirical','Ke_theoretical','Tb','Qgen','EHL','MHP','EHL/MHP','energy_balance','water_loss_mass','dehydration_mass','excess_proportion_of_mass_lost','excess_water','metabolic_heat_required','water_loss_required','proportion_water_loss_required','excess_metabolic_heat','Qgen_water_avg','Qgen_water_sum','Qgen_heat_avg','Qgen_heat_sum','activity_thermal_stress','activity_water_stress','water_stress','heat_stress','hr_restriction'],index = False)
 
+
 if __name__ == '__main__':
+    'an if statement that multiprocesses the function above to run faster'
     pool = multiprocessing.Pool(processes = 24)
     pool.map(run_endotherm,range(0,90,1))
     pool.close()
