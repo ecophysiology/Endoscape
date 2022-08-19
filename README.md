@@ -25,15 +25,15 @@ The functional traits csv contains  important functional traits that influence h
 - version = used for downstream data organization if simulations were run with known physiology; recommended to set to 'no_physiology'
 - water_threshold = a user defined value for cooling costs that can determine when an organism seeks shade and ceases activity
 - physiology_known_master - = runs an extra set of simulations that incorporates empirical relationships related to water loss, metabolism, and body temperature (0 = unknown; 1 = known); recommended to set to 0. Keep consistent with physiology_known.
-- body_temperature_min = use the normothermic body temperature of the animal ( $\text{\textdegree}$ C)
-- body_temperature_max  = the maximum body temperature of the animal ( $\text{\textdegree}$ C)
-- lower_critical_temperature = the lower critical temperature of the animal, default set to 25 $\text{\textdegree}$ C
-- upper_critical_temperature = the upper critical temperature of the animal, default set to 35 $\text{\textdegree}$ C
-- water_heat_ratio_slope = the slope of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature (recommended to ignore)
-- water_heat_ratio_intercept = the intercept of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature (recommended to ignore)
-- body_temperature_slope1 = the slope of the relationship between body temperatures regressed against air temperature
-- body_temperature_slope2 = the slope of the relationship between body temperatures regressed against air temperature
-- body_temperature_intercept
-- water_loss_slope 
-- water_loss_intercept
+- body_temperature_min = use the normothermic body temperature of the animal (C)
+- body_temperature_max  = the maximum body temperature of the animal (C)
+- lower_critical_temperature = the lower critical temperature of the animal, default set to 25C
+- upper_critical_temperature = the upper critical temperature of the animal, default set to 35C
+- water_heat_ratio_slope = (recommended to ignore) the slope of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature 
+- water_heat_ratio_intercept = (recommended to ignore) the intercept of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature
+- body_temperature_slope1 = (recommended to ignore) the slope of the relationship between body temperature regressed against air temperature; first regression if using broken stick
+- body_temperature_slope2 = (recommended to ignore) the slope of the relationship between body temperature regressed against air temperature; second regression if using broken stick
+- body_temperature_intercept = (recommended to ignore) the intercept of the relationship between body temperature regressed against air temperature
+- water_loss_slope = (recommended to ignore) the slope of the relationship between evaporative heat loss regressed against air temperature
+- water_loss_intercept = (recommended to ignore) the intercept of the relationship between evaporative heat loss regressed against air temperature
 
