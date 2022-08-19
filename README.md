@@ -8,7 +8,7 @@ The functional traits csv contains  important functional traits that influence h
 
 - activity pattern = the primary times of day the animal is active (diurnal or nocturnal)
 - mass = mass of the animal (grams)
-- insulation_conductivity = thermal conductivity of the insulation (W m-1 K-1)
+- insulation_conductivity = thermal conductivity of the insulation (W m^-1 K^-1)
 - density_of_fibers = the density of insulation fibers (fibers cm^-2)
 - shortwave_absorptance_dorsal = the absorptance of the dorsal side of the animal to shortwave radiation (expressed as proportion of total)
 - shortwave_absorptance_ventral = the absorptance of the ventral side of the animal to shortwave radiation (expressed as proportion of total)
