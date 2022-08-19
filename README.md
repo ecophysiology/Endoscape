@@ -37,3 +37,4 @@ The functional traits csv contains  important functional traits that influence h
 - water_loss_slope = (recommended to ignore) the slope of the relationship between evaporative heat loss regressed against air temperature
 - water_loss_intercept = (recommended to ignore) the intercept of the relationship between evaporative heat loss regressed against air temperature
 
+The functional trait database also includes several columns of different types of names for each species (e.g., common names, latin names, species codes).
