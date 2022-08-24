@@ -11,7 +11,7 @@ The functional traits csv contains important functional traits that influence he
 - species = species name (prefer latin, no spaces)
 - common_name = species common name (no spaces)
 - type = mammal or bird
-- activity pattern = the primary times of day the animal is active (diurnal or nocturnal)
+- activity pattern = activity pattern = the general time of day when the animal is active (diurnal or nocturnal)
 - mass = mass of the animal (grams)
 - insulation_conductivity = thermal conductivity of the insulation (W m^-1 K^-1)
 - density_of_fibers = the density of insulation fibers (fibers cm^-2)
