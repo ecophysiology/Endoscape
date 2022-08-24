@@ -24,7 +24,6 @@ The functional traits csv contains  important functional traits that influence h
 - physiology_known = runs an extra set of simulations that incorporates empirical relationships related to water loss, metabolism, and body temperature (0 = unknown; 1 = known); recommended to set to 0.
 - version = used for downstream data organization if simulations were run with known physiology; recommended to set to 'no_physiology'
 - water_threshold = a user defined value for cooling costs that can determine when an organism seeks shade and ceases activity
-- physiology_known_master = runs an extra set of simulations that incorporates empirical relationships related to water loss, metabolism, and body temperature (0 = unknown; 1 = known); recommended to set to 0. Keep consistent with physiology_known.
 - body_temperature_min = use the normothermic body temperature of the animal (C)
 - body_temperature_max  = the maximum body temperature of the animal (C)
 - lower_critical_temperature = the lower critical temperature of the animal, default set to 25C
