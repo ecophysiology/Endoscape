@@ -3,9 +3,10 @@
 #---------------------#
 '''The following version of Endoscape predicts thermoregulatory requirements
 for small mammals and birds. The script requires a few files to run. The first
-file is endotherm_properties.csv, which contains the species-specific traits
-required to make the calculations. The simulation also requires a database of sites
-and the site-specific dataframes for each site.'''
+file is mammal_properties.csv, which contains the species-specific traits
+required to make the calculations. It also requires site characteristics (sites.csv)
+The simulation also requires a database of sites and the site-specific 
+dataframes for each site.'''
 
 #---------------------#
 #------LIBRARIES------#
