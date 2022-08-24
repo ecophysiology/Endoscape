@@ -6,6 +6,9 @@ The Endoscape simulations require three key components to generatate estimates o
 ## Functional traits
 The functional traits csv contains  important functional traits that influence heat budgets of birds and mammals and are required for running the Endoscape simulation. These include:
 
+- species = species name (prefer latin, no spaces)
+- common_name = species common name (no spaces)
+- type = mammal or bird
 - activity pattern = the primary times of day the animal is active (diurnal or nocturnal)
 - mass = mass of the animal (grams)
 - insulation_conductivity = thermal conductivity of the insulation (W m^-1 K^-1)
