@@ -56,17 +56,17 @@ A csv file with site characteristics.
 
 Estimates of microclimate conditions for every hour of the day for an average day of every month at a single site created using NicheMapR.
 
-DOY	= day of year
-TIME	= time (min)
-D0cm	= soil surface temperature (C)
-D2.5cm	= soil temperature (C) at 2.5 cm
-D5cm	= soil temperature (C) at 5 cm
-D10cm	= soil temperature (C) at 10 cm
-D15cm	= soil temperature (C) at 15 cm
-D20cm	= soil temperature (C) at 20 cm
-D30cm	= soil temperature (C) at 30 cm
-D50cm	= soil temperature (C) at 50 cm
-D100cm	= soil temperature (C) at 100 cm
-D200cm	= soil temperature (C) at 200 cm
-Tair	= air temperature (C) at 2 m from the soil surface (used for birds)
-Tair_mammals = air temperature at 0.1 cm from the soil surface (used for mammals)
+- DOY	= day of year
+- TIME	= time (min)
+- D0cm	= soil surface temperature (C)
+- D2.5cm	= soil temperature (C) at 2.5 cm
+- D5cm	= soil temperature (C) at 5 cm
+- D10cm	= soil temperature (C) at 10 cm
+- D15cm	= soil temperature (C) at 15 cm
+- D20cm	= soil temperature (C) at 20 cm
+- D30cm	= soil temperature (C) at 30 cm
+- D50cm	= soil temperature (C) at 50 cm
+- D100cm	= soil temperature (C) at 100 cm
+- D200cm	= soil temperature (C) at 200 cm
+- Tair	= air temperature (C) at 2 m from the soil surface (used for birds)
+- Tair_mammals = air temperature at 0.1 cm from the soil surface (used for mammals)
