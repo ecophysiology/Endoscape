@@ -40,4 +40,13 @@ The functional trait database also includes several columns of different types o
 
 ## Site characteristics
 
+A csv file with site characteristics.
+
+- site_id = a unique, arbitrary numerical ID for each site
+- site = name of site (not required)
+- longitude = longitude in decimal degrees
+- latitude = latitude in decimal degrees
+- elevation = elevation (m)
+- soil = maxiumum depth of soil at site (m)
+
 ## Microhabitat conditions
