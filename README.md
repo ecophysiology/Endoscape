@@ -3,6 +3,8 @@ A series of integrated biophysical calculations for predicting bird and small ma
 
 The Endoscape simulations require three key components to generatate estimates of thermoregulatory costs for endotherms: (1) a csv file with functional traits of the animal of interest, (2) a csv file containing information about the sites, and (3) a directory containing the microhabitat data for making the simulations. I have provided an example of each of these input files to begin generating data with the script.
 
+The functional trait data provided allow users to generate hourly thermoregulatory costs for an White-tailed antelope squirrel (Ammospermophilus leucurus).
+
 ## Functional traits
 The functional traits csv contains important functional traits that influence heat budgets of birds and mammals and are required for running the Endoscape simulation. These include:
 
