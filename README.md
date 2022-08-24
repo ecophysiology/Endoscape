@@ -1,10 +1,10 @@
 # Endoscape
-A series of integrated biophysical calculations for predicting bird and small mammal thermoregulation
+A series of integrated biophysical calculations for predicting bird and small mammal thermoregulatory costs.
 
-The Endoscape simulations require three key components to generatate estimates of thermoregulatory costs for endotherms: (1) a csv file with functional traits of the animal of interest, (2) a csv file containint information about the sites, and (3) a directory containing the microhabitat data for making the simulations. I have provided an example of each of these input files to begin generating data with the script.
+The Endoscape simulations require three key components to generatate estimates of thermoregulatory costs for endotherms: (1) a csv file with functional traits of the animal of interest, (2) a csv file containing information about the sites, and (3) a directory containing the microhabitat data for making the simulations. I have provided an example of each of these input files to begin generating data with the script.
 
 ## Functional traits
-The functional traits csv contains  important functional traits that influence heat budgets of birds and mammals and are required for running the Endoscape simulation. These include:
+The functional traits csv contains important functional traits that influence heat budgets of birds and mammals and are required for running the Endoscape simulation. These include:
 
 - species = species name (prefer latin, no spaces)
 - common_name = species common name (no spaces)
@@ -31,13 +31,13 @@ The functional traits csv contains  important functional traits that influence h
 - body_temperature_max  = the maximum body temperature of the animal (C)
 - lower_critical_temperature = the lower critical temperature of the animal, default set to 25C
 - upper_critical_temperature = the upper critical temperature of the animal, default set to 35C
-- water_heat_ratio_slope = (recommended to ignore) the slope of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature 
-- water_heat_ratio_intercept = (recommended to ignore) the intercept of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature
-- body_temperature_slope1 = (recommended to ignore) the slope of the relationship between body temperature regressed against air temperature; first regression if using broken stick
-- body_temperature_slope2 = (recommended to ignore) the slope of the relationship between body temperature regressed against air temperature; second regression if using broken stick
-- body_temperature_intercept = (recommended to ignore) the intercept of the relationship between body temperature regressed against air temperature
-- water_loss_slope = (recommended to ignore) the slope of the relationship between evaporative heat loss regressed against air temperature
-- water_loss_intercept = (recommended to ignore) the intercept of the relationship between evaporative heat loss regressed against air temperature
+- water_heat_ratio_slope = (recommended to ignore, leave empty) the slope of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature 
+- water_heat_ratio_intercept = (recommended to ignore, leave empty) the intercept of the relationship between the ratio of evaporative heat dissipation and metabolic heat production regressed against temperature
+- body_temperature_slope1 = (recommended to ignore, leave empty) the slope of the relationship between body temperature regressed against air temperature; first regression if using broken stick
+- body_temperature_slope2 = (recommended to ignore, leave empty) the slope of the relationship between body temperature regressed against air temperature; second regression if using broken stick
+- body_temperature_intercept = (recommended to ignore, leave empty) the intercept of the relationship between body temperature regressed against air temperature
+- water_loss_slope = (recommended to ignore, leave empty) the slope of the relationship between evaporative heat loss regressed against air temperature
+- water_loss_intercept = (recommended to ignore, leave empty) the intercept of the relationship between evaporative heat loss regressed against air temperature
 
 ## Site characteristics
 
