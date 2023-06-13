@@ -616,7 +616,7 @@ def read_temperature(Tair_df):
 #  DATAFRAMES  #
 #--------------#
 'See code description above for explanation'
-species = pandas.read_csv('path/bird_properties.csv')
+species = pandas.read_csv('path/mammal_properties.csv')
 locations = pandas.read_csv('path/sites_Endoscape.csv')
 Tair_df = read_temperature(locations)
 
