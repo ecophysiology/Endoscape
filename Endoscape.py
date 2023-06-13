@@ -203,9 +203,12 @@ class Individual():
         else:
             return 0.
             
-    def azimuth(self,day,t):
+   def azimuth(self,day,t):
         'a function that calculates the azimuth angle'
-        return (math.acos(-1.*(-(math.sin(math.radians(self.declin(day)))-(math.cos(self.zenith(day,t))*math.sin(math.radians(self.latitude)))))/((math.cos(math.radians(self.latitude)))*math.sin(self.zenith(day,t)))))
+        if t <= 12:
+            return (math.acos(-1.*(-(math.sin(math.radians(self.declin(day)))-(math.cos(self.zenith(day,t))*math.sin(math.radians(self.latitude)))))/((math.cos(math.radians(self.latitude)))*math.sin(self.zenith(day,t)))))
+        else:
+            return (2 * math.pi) - (math.acos(-1.*(-(math.sin(math.radians(self.declin(day)))-(math.cos(self.zenith(day,t))*math.sin(math.radians(self.latitude)))))/((math.cos(math.radians(self.latitude)))*math.sin(self.zenith(day,t)))))
         
     def animal_angle(self,day,t):
         'a function that calculates the angle of the animal related to the sun'
