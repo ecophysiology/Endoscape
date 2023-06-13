@@ -1,14 +1,4 @@
 #---------------------#
-#------DESCRIPTION------#
-#---------------------#
-'''The following version of Endoscape predicts thermoregulatory requirements
-for small mammals and birds. The script requires a few files to run. The first
-file is mammal_properties.csv, which contains the species-specific traits
-required to make the calculations. It also requires site characteristics (sites.csv),
-and finally the simulation requires a directory of sites containing the site-specific 
-microclimate data for each site.'''
-
-#---------------------#
 #------LIBRARIES------#
 #---------------------#
 
@@ -19,6 +9,8 @@ import glob as glob
 import multiprocessing as multiprocessing
 import itertools as itertools
 import random as random
+import scipy.interpolate as sci
+from collections import OrderedDict
 
 #--------------------#
 #-----CONSTANTS------#
@@ -27,29 +19,70 @@ import random as random
 SOLAR_CONSTANT = 1360. #W*m^-2
 TAU = 0.7 #0.7 clear day
 STEFAN_BOLTZMANN = 5.670373*10**(-8) #W*m^-2*K^-4
-ALBEDO = 0.4 #ground reflectance (albedo) of dry sandy soil ranges 0.25-0.45
+ALBEDO = 0.30 #ground reflectance (albedo) of dry sandy soil ranges 0.25-0.45
 E_G = 0.9 ##surface emissivity of sandy soil w/<2% organic matter approx 0.88
 OMEGA = math.pi/12.
+Rv = 461.5 #J*K^-1*kg^-1
+L = 2.5*10**6 #J per kg
 
 #-------------------#
 #-----CLASSESS------#
 #-------------------#
 
 class Individual():
-    def __init__(self,endotherm_type,scenario,common_name,latitude,longitude,elevation,length,width,height,insulation_length_dorsal,insulation_length_ventral,density_of_fibers,insulation_depth_dorsal,insulation_depth_ventral,physiology_known,Tb,Tb_max,LCT,UCT,mass,shortwave_absorbance_dorsal,shortwave_absorbance_ventral,longwave_absorbance,water_heat_ratio_slope,water_heat_ratio_intercept,water_loss_slope,water_loss_intercept,Tb_slope1,Tb_slope2,Tb_intercept,windspeed,posture,fiber_density,shade,feather_depths,orientation,shape,water_threshold,insulation_conductivity,activity_pattern,site_number,modern_soils,historic_soils,soil_depth):
+    def __init__(self,endotherm_type,
+                 common_name,
+                 latitude,
+                 longitude,
+                 elevation,
+                 length,
+                 width,
+                 height,
+                 insulation_length_dorsal,
+                 insulation_length_ventral,
+                 density_of_fibers,
+                 insulation_depth_dorsal,
+                 insulation_depth_ventral,
+                 physiology_known,
+                 Tb,
+                 Tb_max,
+                 LCT,
+                 UCT,
+                 mass,
+                 shortwave_absorbance_dorsal,
+                 shortwave_absorbance_ventral,
+                 longwave_absorbance,
+                 water_heat_ratio_slope,
+                 water_heat_ratio_intercept,
+                 water_loss_slope,
+                 water_loss_intercept,
+                 Tb_slope1,
+                 Tb_slope2,
+                 Tb_intercept,
+                 windspeed,
+                 posture,
+                 fiber_density,
+                 shade,
+                 feather_depths,
+                 orientation,
+                 shape,
+                 water_threshold,
+                 insulation_conductivity,
+                 activity_pattern,
+                 site_number,
+                 soil_depth):
         self.type = endotherm_type
-        self.scenario = scenario
         self.common_name = common_name
-        self.latitude = latitude #decimal degrees
-        self.longitude = longitude #decimal degrees
-        self.altitude = elevation #m
-        self.MASS = mass #g
-        self.dehydration_mass = mass #g
-        self.density_of_fibers = density_of_fibers + (density_of_fibers*fiber_density)#fibers per cm^2
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = elevation
+        self.MASS = mass #grams, 22.9 for a white crowned sparrow
+        self.dehydration_mass = mass
+        self.density_of_fibers = density_of_fibers + (density_of_fibers*fiber_density)#fiber number is density
         self.animal_slope = 0.0 + (60.0 * posture)
         self.orientation = orientation
-        self.body_volume = (self.MASS/0.99)/1000000#m^3
-        self.T_b = Tb #C
+        self.body_volume = (self.MASS/0.99)/1000000#m^3; from Seamans et al 1995, determination of bird density of 12 species
+        self.T_b = Tb
         self.Tes_past = 0.0
         self.Qgen_past = 0.0
         self.Tb_max = Tb_max
@@ -59,34 +92,33 @@ class Individual():
         self.lower_critical_temperature = LCT
         self.upper_critical_temperature = UCT
         self.thermoneutral_zone_range = self.upper_critical_temperature - self.lower_critical_temperature
-        self.insulation_depth_dorsal = insulation_depth_dorsal + (insulation_depth_dorsal * feather_depths) #m
-        self.insulation_depth_ventral = insulation_depth_ventral + (insulation_depth_ventral * feather_depths)#m
-        self.A_radius = length/2.0 - ((length/2.0) * (shape*0.35)) #radius of length of prolate spheroid (m)
-        self.B_radius = width/2.0 - ((width/2.0) * (shape*0.35))#radius of width of prolate spheroid (m)
-        self.C_radius = height/2.0 - ((height/2.0) * (shape*0.35))#radius of height of prolate spheroid (m)
-        self.insulation_length_dorsal = insulation_length_dorsal  #m
-        self.insulation_length_ventral = insulation_length_ventral #m
+        self.insulation_depth_dorsal = insulation_depth_dorsal + (insulation_depth_dorsal * feather_depths) #0.02 * (self.MASS**(1./5.))#Bakken 1976,m
+        self.insulation_depth_ventral = insulation_depth_ventral + (insulation_depth_ventral * feather_depths)#0.02 * (self.MASS**(1./5.))#Bakken 1976,m
+        self.length = length
+        self.height = height
+        self.width = width
+        self.A_radius = self.length/2.0 - ((length/2.0) * (shape*0.35)) #radius of length of prolate spheroid
+        self.B_radius = self.width/2.0 - ((width/2.0) * (shape*0.35))#radius of width of prolate spheroid
+        self.C_radius = self.height/2.0 - ((height/2.0) * (shape*0.35))#radius of height of prolate spheroid
+        self.insulation_length_dorsal = insulation_length_dorsal
+        self.insulation_length_ventral = insulation_length_ventral
         self.D = (self.body_volume)**(1.0/3.0) #characteristic dimension
-        self.H = self.A_radius * 2.0 #length of cylinder (m)
-        self.S = 1.0 + shade #proportion of animal exposed to direct solar radiation
-        self.A_S_dorsal = shortwave_absorbance_dorsal #absorptance of organism to shortwave radiation
-        self.A_S_ventral = shortwave_absorbance_ventral #absorptance of organism to shortwave radiation
-        self.A_L = longwave_absorbance #absorptance of organism to longwave radiation
+        self.H = self.A_radius * 2.0 #length of cylinder, meters, only used if you want to use the rounded cyclinder for view factor
+        self.S = 1.0 + shade #self.grid[self.x,self.y] #proportion of animal exposed to direct solar radiation (non-shaded)
+        self.A_S_dorsal = shortwave_absorbance_dorsal #absorptance of organism to shortwave radiation; solar absorptivity is approx 0.9 for lizards, 0.75 for most birds and mammals [Gates 1980, Buckley 2008]
+        self.A_S_ventral = shortwave_absorbance_ventral
+        self.A_L = longwave_absorbance #absorptance of organism to longwave radiation; thermal absorptivity approx 0.965 [Bartlett and Gates 1967, Buckley 2008]
         self.E_S = 0.97 #emissivity of organism
-        self.conductivity_insulation = insulation_conductivity #thermal conductivity of insulation 
-        self.A_radius_insulation = self.A_radius #m
-        self.B_radius_insulation = self.B_radius #m
-        self.C_radius_insulation = self.C_radius #m
-        self.surface_area_outer = (4*math.pi*(((((self.A_radius_insulation*self.B_radius_insulation)**1.6)+((self.A_radius_insulation*self.C_radius_insulation)**1.6)+((self.B_radius_insulation*self.C_radius_insulation)**1.6))/3.0)**(1/1.6)))#*1.3 #m^2
-        self.surface_area_inner = 1.23 * self.surface_area_outer #m^2
-        self.surface_area_outer_cold = self.surface_area_outer * 0.73 #m^2
-        self.surface_area_inner_cold = self.surface_area_inner * 0.73 #m^2
-        self.surface_area_outer_splayed  = self.surface_area_outer * 1.2 #m^2
-        self.surface_area_inner_splayed  = self.surface_area_inner * 1.2 #m^2
+        self.conductivity_insulation = insulation_conductivity #thermal conductivity of insulation W/m C - assumed 0.027 in Porter and Kearney 2010, PNAS or 0.0257 for still air, or 0.075 from Wolf and Walsberg 2000,0.11 was from Webster
+        self.A_radius_insulation = self.A_radius
+        self.B_radius_insulation = self.B_radius
+        self.C_radius_insulation = self.C_radius
+        self.surface_area_outer = (4*math.pi*(((((self.A_radius_insulation*self.B_radius_insulation)**1.6)+((self.A_radius_insulation*self.C_radius_insulation)**1.6)+((self.B_radius_insulation*self.C_radius_insulation)**1.6))/3.0)**(1/1.6)))#*1.3
+        self.surface_area_inner = 1.23 * self.surface_area_outer
         self.conductance_insulation_dorsal = self.conductivity_insulation/self.insulation_depth_dorsal#W K-1
         self.conductance_insulation_ventral = self.conductivity_insulation/self.insulation_depth_ventral#W K-1
         self.conductivity_skin = 2.8 #thermal conductivity of skin W m-1 C-1,vasoconstricted
-        self.skin_depth = 0.01 * (self.D**(0.6))#Bakken 1976, m
+        self.skin_depth = 0.01 * (self.D**(0.6))#Bakken 1976
         self.conductance_skin = self.conductivity_skin/self.skin_depth#Bakken 1976,W m-2 K-1
         self.conductance_skin_insulation_dorsal = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))
         self.conductance_skin_insulation_ventral = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))
@@ -119,8 +151,6 @@ class Individual():
         self.active_hours = 0.0
         self.activity_pattern = activity_pattern
         self.site = site_number
-        self.modern_soils = modern_soils
-        self.historic_soils = historic_soils
         self.daylight = 0.0
         self.Tref = 0.0
         self.Te_dorsal = 0.0
@@ -129,35 +159,36 @@ class Individual():
         self.Ri_d = 0.0
         self.soil_ref = 'above'
         self.soil_depth = soil_depth
-    
+        self.site_label = 'empty'
+
     def orbit_correction(self,day):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         return 1 + 2 * 0.01675 * math.cos((((2*math.pi)/365))*day)
     
     def direct_solar_radiation(self,day):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         return self.orbit_correction(day)*SOLAR_CONSTANT
         
     def f(self,day):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         return 279.575 + (0.9856 * day)
     
     def ET(self,day):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         _f = math.radians(self.f(day))
         return (-104.7*math.sin(_f)+596.2*math.sin(2*_f)+4.3*math.sin(3*_f)-12.7*math.sin(4*_f)-429.3*math.cos(_f)-2.0*math.cos(2*_f)+19.3*math.cos(3*_f))/3600.
     
     def LC(self,lon):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         return ((lon%15)*4.0)/60
 
     def t0(self,lc,et):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         t = 12 + lc - et
         return t
 
     def hour(self,t,t_zero):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         h = 15*(t-t_zero)
         return h
 
@@ -181,7 +212,7 @@ class Individual():
         return (math.acos((math.cos(math.radians(self.animal_slope)) * math.cos(self.zenith(day,t))) + (math.sin(math.radians(self.animal_slope)) * math.sin(self.zenith(day,t)) * math.cos(self.azimuth(day,t)-math.radians(180.- self.animal_slope)))))
             
     def m(self,day,hrs):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'optimal air mass number (eq. 11.11), a function required to estimate solar radiation from Campbell and Norman (1998)'
         p_a = 101.3*math.exp(-self.altitude/8200)
         if math.cos(self.zenith(day,hrs))>=0.:
             return p_a/(101.3*(math.cos(self.zenith(day,hrs))))
@@ -189,7 +220,7 @@ class Individual():
             return 0.
             
     def hS0(self,day,hrs):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         z = self.zenith(day,hrs)
         if math.cos(z)>= 0.:
             return self.direct_solar_radiation(day)*(math.cos(z))
@@ -197,7 +228,7 @@ class Individual():
             return 0.
             
     def hS(self,day, hrs, tau):
-        'a function required to estimate solar radiation from Campbell and Norman (2010)'
+        'a function required to estimate solar radiation from Campbell and Norman (1998)'
         self.daylight = self.hS0(day,hrs)*tau**self.m(day,hrs)
         return self.hS0(day,hrs)*tau**self.m(day,hrs)
 
@@ -213,134 +244,92 @@ class Individual():
         'a function for view factor for a proloate spheroid'
         view_factor = ((math.sqrt(1+((((b/a)**2)-1)*((math.cos(math.radians(90.-math.degrees(animal_angle))))**2))))/((2*(b/a))+((2*(math.asin(math.sqrt((1-((b/a)**2))))))/(math.sqrt((1-((b/a)**2)))))))
         return view_factor + (view_factor * self.orientation)
-    
-    def air_temp(self,mins,maxes,day,hour):
-        'a function grabs air temperature data for birds from NicheMapR output files'
-        if self.scenario =='historic':
-            self.Tref = self.historic_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-        elif self.scenario == 'modern':
-            self.Tref = self.modern_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-        return(self.Tref)
 
-    def ground_temp(self,day,hour):
-        'a function grabs data from NicheMapR and is used exclusively for longwave radiation from the ground for mammals'
-        self.Tref = 0.0
-        if self.type == 'mammal':
-            if self.soil_ref == 'above':
-                    if self.scenario == 'historic':
-                        self.Tref = self.historic_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                    elif self.scenario == 'modern':
-                        self.Tref = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-            else:
-                    if self.scenario == 'historic':
-                        if self.soil_depth < 0.05:
-                            self.Tref = self.historic_soils['D2.5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.05 and self.soil_depth < 0.1:
-                            self.Tref = self.historic_soils['D5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.1 and self.soil_depth < 0.15:
-                            self.Tref = self.historic_soils['D10cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.15 and self.soil_depth < 0.2:
-                            self.Tref = self.historic_soils['D15cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.2 and self.soil_depth < 0.3:
-                            self.Tref = self.historic_soils['D20cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.3 and self.soil_depth < 0.5:
-                            self.Tref = self.historic_soils['D30cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.5 and self.soil_depth < 1.0:
-                            self.Tref = self.historic_soils['D50cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 1.0:
-                            self.Tref = self.historic_soils['D100cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                    elif self.scenario == 'modern':
-                        if self.soil_depth < 0.05:
-                            self.Tref = self.modern_soils['D2.5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.05 and self.soil_depth < 0.1:
-                            self.Tref = self.modern_soils['D5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.1 and self.soil_depth < 0.15:
-                            self.Tref = self.modern_soils['D10cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.15 and self.soil_depth < 0.2:
-                            self.Tref = self.modern_soils['D15cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.2 and self.soil_depth < 0.3:
-                            self.Tref = self.modern_soils['D20cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.3 and self.soil_depth < 0.5:
-                            self.Tref = self.modern_soils['D30cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.5 and self.soil_depth < 1.0:
-                            self.Tref = self.modern_soils['D50cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 1.0:
-                            self.Tref = self.modern_soils['D100cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-        return self.Tref
-                
-    def ground_temp_NicheMapR(self,day,hour):
-        'a function that grabs temperatures from NicheMapR output files'
-        self.Tref = 0.0
-        if self.type == 'mammal':
-            if self.soil_ref == 'above':
-                    if self.scenario == 'historic':
-                        self.Tref = self.historic_soils.Tair_mammals.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                    elif self.scenario == 'modern':
-                        self.Tref = self.modern_soils.Tair_mammals.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-            else:
-                    if self.scenario == 'historic':
-                        if self.soil_depth < 0.05:
-                            self.Tref = self.historic_soils['D2.5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.05 and self.soil_depth < 0.1:
-                            self.Tref = self.historic_soils['D5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.1 and self.soil_depth < 0.15:
-                            self.Tref = self.historic_soils['D10cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.15 and self.soil_depth < 0.2:
-                            self.Tref = self.historic_soils['D15cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.2 and self.soil_depth < 0.3:
-                            self.Tref = self.historic_soils['D20cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.3 and self.soil_depth < 0.5:
-                            self.Tref = self.historic_soils['D30cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.5 and self.soil_depth < 1.0:
-                            self.Tref = self.historic_soils['D50cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 1.0:
-                            self.Tref = self.historic_soils['D100cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                    elif self.scenario == 'modern':
-                        if self.soil_depth < 0.05:
-                            self.Tref = self.modern_soils['D2.5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.05 and self.soil_depth < 0.1:
-                            self.Tref = self.modern_soils['D5cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.1 and self.soil_depth < 0.15:
-                            self.Tref = self.modern_soils['D10cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.15 and self.soil_depth < 0.2:
-                            self.Tref = self.modern_soils['D15cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.2 and self.soil_depth < 0.3:
-                            self.Tref = self.modern_soils['D20cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.3 and self.soil_depth < 0.5:
-                            self.Tref = self.modern_soils['D30cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 0.5 and self.soil_depth < 1.0:
-                            self.Tref = self.modern_soils['D50cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                        elif self.soil_depth >= 1.0:
-                            self.Tref = self.modern_soils['D100cm'].iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-        elif self.type == 'bird':
-            if self.scenario == 'historic':
-                        self.Tref = self.historic_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-            elif self.scenario == 'modern':
-                        self.Tref = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-        return self.Tref
-
-    def longwave_sky(self,temperature):
+    def longwave_sky(self,temperature,emissivity):
         'a function for long wave radiation from the sky'
-        return 53.1*10**-14*(temperature+273.15)**6.
+        return emissivity*(5.670373*10**-8 * (temperature + 273.15)**4)
+
+    def sky_emissivity(self,cloud_cover):
+        'a function that calculates sky emissivity'
+        return ((1 - 0.84 * cloud_cover) * 0.79) + (0.84 * cloud_cover)  # pg 173 in Campbell and Norman, equation 10.12
 
     def longwave_ground(self,temperature):
         'a function for long wave radiation from the ground'
         return E_G*STEFAN_BOLTZMANN*(temperature+273.15)**4.
-            
-    def radiative_conductance(self,mins,maxes,day,hour,soil_mins,soil_maxes):
+
+    def dimensionless_temperature(self,hour):
+        'a function that calculates the dimensionless temperature'
+        return 0.44-(0.46*math.sin(((math.pi/12.)*hour)+0.9))+0.11*math.sin(2.*(math.pi/12.)*hour+0.9)
+
+    def Tair(self,Tmin,Tmax,day,hour):
+        'a function that returns air temperature from monthly minimum and maximum temperatures'
+        if day < 0:
+            day = 364 + day
+        if hour > -1.0 and hour <= 5.:
+            T_air = Tmax[day-1]*self.dimensionless_temperature(hour)+Tmin[day]*(1-self.dimensionless_temperature(hour))
+            self.Tref = T_air
+            return T_air
+        if hour > 5. and hour <= 14.:
+            T_air = Tmax[day]*self.dimensionless_temperature(hour)+Tmin[day]*(1-self.dimensionless_temperature(hour))
+            self.Tref = T_air
+            return T_air
+        if hour >14 and hour <= 25.:
+            if day == 364:
+                T_air = Tmax[day]*self.dimensionless_temperature(hour)+Tmin[0]*(1-self.dimensionless_temperature(hour))
+                self.Tref = T_air
+                return T_air
+            else:
+                T_air = Tmax[day]*self.dimensionless_temperature(hour)+Tmin[day+1]*(1-self.dimensionless_temperature(hour))
+                self.Tref = T_air
+                return T_air
+
+    def Tground(self,T_air,T_deep,Tmin,Tmax,Titerate,RH,day,hour,n,windspeed,cloud_cover,sky_emissivity,tau):
+        'a function to estimate the soil surface temperature from Leaf and Erell (2018)'
+        net_shortwave_radiation = (1 - ALBEDO) * ((1 - cloud_cover) * (self.hS(day, hour,tau)) + self.diffuse_solar(day, hour, tau))
+        net_longwave_radiation = self.longwave_sky(T_air,sky_emissivity)-((1-0.96)*self.longwave_ground(Titerate))
+        net_radiative_flux = (net_shortwave_radiation + net_longwave_radiation)-(0.96*STEFAN_BOLTZMANN*((Titerate+273.)**4))
+        air_pressure = (101325. * (1. - (2.2569 * 10 ** -5) * self.altitude) ** 5.2553)
+        air_density = air_pressure / (287.04 * (T_air+273.))
+        e_s = 0.611*math.exp((L/Rv)*((1./273.15)-(1./(T_air+273.))))
+        e_a = (RH/100.0) * e_s
+        mixing_ratio = (0.6257 * (e_a * 1000)) / (air_pressure - (1.006 * (e_a * 1000)))
+        specific_heat = (1004.84 + (1846.4 * mixing_ratio)) / (1 + mixing_ratio)
+        z_0 = 0.0005 #0.001, roughness length, m, Porter et al. 1973, Kelso Dunes, range 0.05 - 0.1 cm
+        z_r = 2.0 #reference height, m, Porter et al. 1973
+        hc = (((air_density * specific_heat * (0.4**2) * windspeed)/(math.log(((z_r/z_0)+1))**2))) #roughness length, cm, Porter et al. 1973, W m-2 C-1
+        r_a = ((specific_heat * air_density) / hc) / 100 #aerodynamic resistance, s m-1
+        thermal_conductivity_soil = 0.25 #dry sand, W m-1 K-1, range of thermal conductivities: 0.25 - 3.0 W m-1 K-1; Chen 2008
+        bulk_density = 1200.0 # bulk density of sand soils generally varies from 1.2 – 1.4 Mg m-3.; Alnefaie and Abu-Hamdeh (2013)
+        specific_heat_soil = 830.0 # specific heat of sand varies from 0.83 to 1.67 kJ kg-1 C-1 depending on the water content; Alnefaie and Abu-Hamdeh (2013)
+        volumetric_heat_capacity = bulk_density * specific_heat_soil
+        diffusivity_soil = thermal_conductivity_soil / volumetric_heat_capacity
+        z_deep = 0.80 #max depth; m
+        z_mid = 0.20 #mid depth; m
+        damping_depth = math.sqrt(2.0*(diffusivity_soil/((2*math.pi)/(24.0*3600.0)))) #see example 1.2 in Campbell and Norman
+        T_mid = T_deep + ((Tmax - Tmin) / 2.0) * (2.71 ** (-z_mid / damping_depth)) * math.sin((math.pi / 12.) * (hour - 8.) - (z_mid / damping_depth))
+        delta_time = 1.0
+        net_evaporative_flux = 0.0
+        T_surface = (net_radiative_flux - net_evaporative_flux + ((air_density * specific_heat * T_air)/r_a) + ((((thermal_conductivity_soil/z_deep)*T_deep)+((volumetric_heat_capacity*z_deep)/(2*delta_time)*T_mid))/(1+(z_mid/z_deep)+((volumetric_heat_capacity*z_mid*z_deep)/(2*delta_time*thermal_conductivity_soil)))))/(((air_density * specific_heat)/r_a) + ((((thermal_conductivity_soil/z_deep))+((volumetric_heat_capacity*z_deep)/(2*delta_time)))/(1+(z_mid/z_deep)+((volumetric_heat_capacity*z_mid*z_deep)/(2*delta_time*thermal_conductivity_soil)))))
+        if n < 1:
+            return T_surface
+            #return [T_air,T_surface,net_radiative_flux,T_deep,T_mid,tau,cloud_cover]
+        else:
+            return self.Tground(T_air,T_deep,Tmin,Tmax,T_surface,RH,day,hour,n-1,windspeed,cloud_cover,sky_emissivity,tau)
+
+    def radiative_conductance(self,T_air,T_ground):
         'a function for radiative conductance'
         if self.type == "bird":
-            return (4.0 * (self.surface_area_outer/2.0) * STEFAN_BOLTZMANN * self.E_S * ((self.air_temp(mins,maxes,day,hour)+273.15)**3.)) #Bakken, for bird, divided by half for 2D heat flow
+            return (4.0 * (self.surface_area_outer/2.0) * STEFAN_BOLTZMANN * self.E_S * ((T_air+273.15)**3.)) #Bakken, for bird, divided by half for 2D heat flow
         elif self.type == "mammal":
-            return (4.0 * (self.surface_area_outer/2.0) * STEFAN_BOLTZMANN * self.E_S * ((self.ground_temp_NicheMapR(day,hour)+273.15)**3.)) #Bakken, for mammal, divided by half for 2D heat flow, W K-1
+            return (4.0 * (self.surface_area_outer/2.0) * STEFAN_BOLTZMANN * self.E_S * ((T_ground+273.15)**3.)) #Bakken, for mammal, divided by half for 2D heat flow, W K-1
         else:
             print("Warning: incorrect endotherm type")
     
-    def convective_conductance(self,mins,maxes,day,hour,soil_mins,soil_maxes,windspeed):
+    def convective_conductance(self,T_air,T_ground,windspeed):
         'a function for convective conductance'
         if self.type == "bird":
             air_pressure = (101325.*(1.-(2.2569*10**-5)*self.altitude)**5.2553)
-            temp_K = self.air_temp(mins,maxes,day,hour) + 273.15
+            temp_K = T_air + 273.15
             thermal_conductivity = (2.4525*10**-2)+((7.038*10**-5)*(temp_K-273.15))
             air_density = air_pressure/(287.04*temp_K)
             dynamic_viscosity = (1.8325*10**-5)*((296.16+120.)/(temp_K+120.))*((temp_K/296.16)**1.5)
@@ -351,7 +340,7 @@ class Individual():
             return hc_enhanced * (self.surface_area_outer/2.0)
         elif self.type == "mammal":
             air_pressure = (101325.*(1.-(2.2569*10**-5)*self.altitude)**5.2553)
-            temp_K = self.ground_temp_NicheMapR(day,hour) + 273.15
+            temp_K = T_ground + 273.15
             thermal_conductivity = (2.4525*10**-2)+((7.038*10**-5)*(temp_K-273.15))
             air_density = air_pressure/(287.04*temp_K)
             dynamic_viscosity = (1.8325*10**-5)*((296.16+120.)/(temp_K+120.))*((temp_K/296.16)**1.5)
@@ -367,22 +356,22 @@ class Individual():
         'a function calculates the propability that a ray of sunlight passes through the insulation to hit the skin directly'
         return (self.density_of_fibers * 10000.) * 0.00003 * ((((1. + (math.tan(numpy.arccos(self.insulation_depth_dorsal/self.insulation_length_dorsal))**2.))*(1. + (math.tan(self.animal_angle(day,time))**2.)))-((1.+ math.tan(numpy.arccos(self.insulation_depth_dorsal/self.insulation_length_dorsal))*math.tan(self.animal_angle(day,time))*math.cos(self.azimuth(day,time)))**2.))**(1./2.))
     
-    def radiation_abs(self,area,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
+    def radiation_abs(self,area,T_air,T_ground,day,hour,tau,windspeed,sky_emissivity):
         'a function calculates the total amount of absorbed radiation'
         if area == "dorsal" and self.type == "bird":
-                return ((self.S*(self.A_S_dorsal + ((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed)+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))/(self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_dorsal)) * (2.-self.A_S_dorsal)))*((self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS0(day,hour))+((self.diffuse_solar(day,hour,tau)))))+(self.A_L*((self.longwave_sky(self.air_temp(mins,maxes,day,hour)))))
+                return ((self.S*(self.A_S_dorsal + ((self.convective_conductance(T_air,T_ground,windspeed)+self.radiative_conductance(T_air,T_ground))/(self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_dorsal)) * (2.-self.A_S_dorsal)))*((self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS(day,hour,tau))+((self.diffuse_solar(day,hour,tau)))))+(self.A_L*((self.longwave_sky(T_air,sky_emissivity))))
         elif area == "dorsal" and self.type == "mammal":
             if self.activity_pattern == 'diurnal' and self.daylight > 0:
-                return ((self.S*(self.A_S_dorsal + ((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed)+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))/(self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_dorsal)) * (2.-self.A_S_dorsal)))*((self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS0(day,hour))+((self.diffuse_solar(day,hour,tau)))))+(self.A_L*((self.longwave_sky(self.ground_temp_NicheMapR(day,hour)))))
+                return ((self.S*(self.A_S_dorsal + ((self.convective_conductance(T_air,T_ground,windspeed)+self.radiative_conductance(T_air,T_ground))/(self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_dorsal)) * (2.-self.A_S_dorsal)))*((self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS(day,hour,tau))+((self.diffuse_solar(day,hour,tau)))))+(self.A_L*((self.longwave_sky(T_air,sky_emissivity))))
             else:
-                return (self.S*(self.A_S_dorsal*(self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS0(day,hour)))+((self.diffuse_solar(day,hour,tau))))+(self.A_L*((self.longwave_sky(self.ground_temp_NicheMapR(day,hour)))))
+                return (self.S*(self.A_S_dorsal*(self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS(day,hour,tau)))+((self.diffuse_solar(day,hour,tau))))+(self.A_L*((self.longwave_sky(T_air,sky_emissivity))))
         elif area == "ventral" and self.type == "bird":
-                return ((self.S*(self.A_S_ventral + ((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed)+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))/(self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_ventral)) * (2.-self.A_S_ventral)))*((self.reflected_radiation(day,hour,tau))))+(self.A_L*(self.longwave_ground(self.ground_temp_NicheMapR(day,hour))))
+                return ((self.S*(self.A_S_ventral + ((self.convective_conductance(T_air,T_ground,windspeed)+self.radiative_conductance(T_air,T_ground))/(self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_ventral)) * (2.-self.A_S_ventral)))*((self.reflected_radiation(day,hour,tau))))+(self.A_L*(self.longwave_ground(T_ground)))
         elif area == "ventral" and self.type == "mammal":
             if self.activity_pattern == 'diurnal' and self.daylight > 0:
-                return ((self.S*(self.A_S_ventral + ((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed)+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))/(self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_ventral)) * (2.-self.A_S_ventral)))*((self.reflected_radiation(day,hour,tau))))+(self.A_L*(self.longwave_ground(self.ground_temp(day,hour))))
+                return ((self.S*(self.A_S_ventral + ((self.convective_conductance(T_air,T_ground,windspeed)+self.radiative_conductance(T_air,T_ground))/(self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))*(1./(self.probability(day,hour) * self.insulation_length_ventral)) * (2.-self.A_S_ventral)))*((self.reflected_radiation(day,hour,tau))))+(self.A_L*(self.longwave_ground(T_ground)))
             else:
-                return (self.S*(self.A_S_ventral*(self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS0(day,hour))+((self.reflected_radiation(day,hour,tau))))+(self.A_L*((self.longwave_ground(self.ground_temp(day,hour))))))
+                return (self.S*(self.A_S_ventral*(self.view_factor_prolate_spheroid(self.animal_angle(day,hour),self.A_radius*2,self.B_radius*2)*self.hS(day,hour,tau))+((self.reflected_radiation(day,hour,tau))))+(self.A_L*((self.longwave_ground(T_ground)))))
         else:
             print("Warning in radiation absorbed")
   
@@ -396,21 +385,21 @@ class Individual():
         else:
             print("Warning in effective conductance")
             
-    def Ke_overall(self,mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed):
+    def Ke_overall(self,T_air,T_ground,field_windspeed):
         'a function for total effective conductance'
-        field_dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
-        field_ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
+        field_dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
+        field_ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
         return field_dorsal_conductance + field_ventral_conductance
 
-    def Q_gen(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed):
+    def Q_gen(self,T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity):
         'a function calculates dorsal and ventral net sensible heat flux from both sides independently and then adds them together'
         if self.type == "bird":
-            dorsal_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
-            ventral_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
-            dorsal_conductance_standard = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
-            ventral_conductance_standard = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
-            dorsal_conductance_field = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
-            ventral_conductance_field = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
+            dorsal_Te = T_air + (((self.radiation_abs('dorsal',T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_air)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,field_windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, bird
+            ventral_Te = T_air + (((self.radiation_abs('ventral',T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_air)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,field_windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, bird
+            dorsal_conductance_standard = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
+            ventral_conductance_standard = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
+            dorsal_conductance_field = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
+            ventral_conductance_field = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
             relative_conductance_dorsal = dorsal_conductance_field/dorsal_conductance_standard
             relative_conductance_ventral = ventral_conductance_field/ventral_conductance_standard
             Tes_dorsal = relative_conductance_dorsal*dorsal_Te + (1. - relative_conductance_dorsal)*self.T_b
@@ -418,12 +407,12 @@ class Individual():
             Qgen_dorsal = dorsal_conductance_field*(self.T_b - Tes_dorsal)
             Qgen_ventral = ventral_conductance_field*(self.T_b - Tes_ventral)
         if self.type == "mammal":
-            dorsal_Te = self.ground_temp_NicheMapR(day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.ground_temp_NicheMapR(day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, mammal
-            ventral_Te = self.ground_temp_NicheMapR(day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.ground_temp_NicheMapR(day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, mammal
-            dorsal_conductance_standard = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
-            ventral_conductance_standard = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
-            dorsal_conductance_field = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
-            ventral_conductance_field = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
+            dorsal_Te = T_ground + (((self.radiation_abs('dorsal',T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_ground)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,field_windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, mammal
+            ventral_Te = T_ground + (((self.radiation_abs('ventral',T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_ground)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,field_windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, mammal
+            dorsal_conductance_standard = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
+            ventral_conductance_standard = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
+            dorsal_conductance_field = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
+            ventral_conductance_field = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
             relative_conductance_dorsal = dorsal_conductance_field/dorsal_conductance_standard
             relative_conductance_ventral = ventral_conductance_field/ventral_conductance_standard
             Tes_dorsal = relative_conductance_dorsal*dorsal_Te + (1. - relative_conductance_dorsal)*self.T_b
@@ -432,36 +421,41 @@ class Individual():
             Qgen_ventral = ventral_conductance_field*(self.T_b - Tes_ventral)
         return Qgen_dorsal + Qgen_ventral
         
-    def operative_temperature(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
+    def operative_temperature(self,T_air,T_ground,day,hour,tau,windspeed,sky_emissivity):
         'a function for operative temperature'
         if self.type == "bird":
-            self.dorsal_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
-            ventral_Te = self.air_temp(mins,maxes,day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.air_temp(mins,maxes,day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, bird
-            dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))
-            ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))
+            self.dorsal_Te = T_air + (((self.radiation_abs('dorsal',T_air,T_ground,day,hour,tau,windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_air)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, bird
+            ventral_Te = T_air + (((self.radiation_abs('ventral',T_air,T_ground,day,hour,tau,windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_air)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, bird
+            dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,windspeed))
+            ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,windspeed))
             total_conductance = dorsal_conductance + ventral_conductance
             return ((dorsal_conductance * self.dorsal_Te)+(ventral_conductance * ventral_Te))/total_conductance
         elif self.type == "mammal":
-            self.dorsal_Te = self.ground_temp_NicheMapR(day,hour) + (((self.radiation_abs('dorsal',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.ground_temp_NicheMapR(day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, mammmal
-            ventral_Te = self.ground_temp_NicheMapR(day,hour) + (((self.radiation_abs('ventral',mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + self.ground_temp_NicheMapR(day,hour))**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))+self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes))) #Bakken, mammal
-            dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))
-            ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,windspeed))
+            self.dorsal_Te = T_ground + (((self.radiation_abs('dorsal',T_air,T_ground,day,hour,tau,windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_ground)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, mammmal
+            ventral_Te = T_ground + (((self.radiation_abs('ventral',T_air,T_ground,day,hour,tau,windspeed,sky_emissivity)*(self.surface_area_outer/2.))-(self.E_S*STEFAN_BOLTZMANN*((273.5 + T_ground)**4)*(self.surface_area_outer/2.)))/((self.convective_conductance(T_air,T_ground,windspeed))+self.radiative_conductance(T_air,T_ground))) #Bakken, mammal
+            dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,windspeed))
+            ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,windspeed))
             total_conductance = dorsal_conductance + ventral_conductance
             return ((dorsal_conductance * self.dorsal_Te)+(ventral_conductance * ventral_Te))/total_conductance
         else:
             print("Error in operative temperature")
     
-    def standard_operative_temperature(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed):
+    def standard_operative_temperature(self,T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity,n):
         'a function for standard operative temperature'
-        dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
-        ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,self.windspeed))
+        dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
+        ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,self.windspeed))
         standard_overall_conductance = dorsal_conductance + ventral_conductance
-        field_dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
-        field_ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(mins,maxes,day,hour,soil_mins,soil_maxes),self.convective_conductance(mins,maxes,day,hour,soil_mins,soil_maxes,field_windspeed))
+        field_dorsal_conductance = self.effective_conductance("dorsal",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
+        field_ventral_conductance = self.effective_conductance("ventral",self.radiative_conductance(T_air,T_ground),self.convective_conductance(T_air,T_ground,field_windspeed))
         field_total_conductance = field_dorsal_conductance + field_ventral_conductance
         relative_conductance = field_total_conductance/standard_overall_conductance
-        return self.T_b - relative_conductance*(self.T_b - self.operative_temperature(mins,maxes,day,hour,tau,soil_mins,soil_maxes,field_windspeed))
-        
+        Tes = self.T_b - relative_conductance*(self.T_b - self.operative_temperature(T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity))
+        self.update_skin_conductance(Tes)
+        if n < 1:
+            return Tes
+        else:
+            return self.standard_operative_temperature(T_air,T_ground,day,hour,tau,field_windspeed,sky_emissivity,n-1)
+
     def update_skin_conductance(self,Tes):
         'a function that adjusts the skin conductance based on operative temperature'
         if Tes <= self.lower_critical_temperature:
@@ -473,17 +467,6 @@ class Individual():
         self.conductance_skin = self.conductivity_skin/self.skin_depth
         self.conductance_skin_insulation_dorsal = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))
         self.conductance_skin_insulation_ventral = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))
-    
-    def update_Tb(self,Tes,Tb_max):
-        'a function is only used if physiological sensitivities are known, not used for the publication'
-        if Tes <= 30.0:
-            self.T_b  = (self.Tb_slope1 * 30.) + (self.Tb_slope2 * (30.0**2)) + self.Tb_intercept
-        elif Tes > 30 and Tes <= 55:
-            self.T_b  = (self.Tb_slope1 * Tes) + (self.Tb_slope2 * (Tes**2)) + self.Tb_intercept
-        else:
-            self.T_b  = (self.Tb_slope1 * 55.) + (self.Tb_slope2 * (55.**2)) + self.Tb_intercept
-        if self.T_b > Tb_max:
-            self.T_b = Tb_max
             
     def update_water_loss_rate(self,Tes):#2.41 J mg^-1;rates are g/hour
         'a function is only used if physiological sensitivities are known, not used for the publication'
@@ -569,178 +552,6 @@ class Individual():
             self.Qgen_water = 0.0
         else:
             print('Error: biophysical demand function -> Qgen equals zero')
-            
-    def define_Tes_past(self,mins,maxes,day,hour,tau,soil_mins,soil_maxes,windspeed):
-        'a function finds the standard operative temperature in the previous hour'
-        if self.physiology_known == 1.0:
-            if hour == 0.0:
-                self.Tes_past = self.standard_operative_temperature(mins,maxes,day-1.,23.,tau,soil_mins,soil_maxes,windspeed)
-                self.Qgen_past = self.Q_gen(mins,maxes,day-1.,23.,tau,soil_mins,soil_maxes,windspeed)
-            else:
-                pass
-        else:
-            if hour == 0.0:
-                self.Tes_past = self.standard_operative_temperature(mins,maxes,day-1.,23.,tau,soil_mins,soil_maxes,windspeed)
-                self.Qgen_past = self.Q_gen(mins,maxes,day-1.,23.,tau,soil_mins,soil_maxes,windspeed)
-            else:
-                pass
-            
-    def activity_thermal_stress(self,Tes_current,Tes_previous,species,hour):
-        'a function that restricts activity based on body temperature, not used for publication'
-        self.activity_above_thermal_stress = 0.0
-        if Tes_previous > self.Tb_max and Tes_current > self.Tb_max:
-            self.activity_above_thermal_stress = 1.0
-        elif Tes_previous < self.Tb_max and Tes_current > self.Tb_max:
-            slope = Tes_current - Tes_previous
-            intercept = Tes_current - (slope * hour)
-            threshold_time = (self.Tb_max - intercept)/slope
-            self.activity_above_thermal_stress = hour - threshold_time
-        elif Tes_previous > self.Tb_max and Tes_current < self.Tb_max:
-            slope = Tes_current - Tes_previous
-            intercept = Tes_current - (slope * hour)
-            threshold_time = (self.Tb_max - intercept)/slope
-            self.activity_above_thermal_stress = hour - threshold_time
-        elif Tes_previous < self.Tb_max and Tes_current < self.Tb_max:
-            pass
-        else:
-            print("Error: condition not met in activity thermal stress function")
-            print(species)
-        
-    def activity_water_stress(self,Tes_current,Tes_previous,Qgen_past,hour):
-        'a function that restricts activity based on water balance, not used for publication'
-        self.activity_above_water_stress = 0.0
-        if Tes_previous <= 30.0:
-            previous_water_heat_ratio = self.water_heat_ratio_intercept*math.exp((self.water_heat_ratio_slope*30.0))
-            previous_evaporative_heat_loss = (self.water_loss_intercept*math.exp((self.water_loss_slope*30.)))/1000.
-        elif Tes_previous > 30.0:
-            previous_water_heat_ratio = self.water_heat_ratio_intercept*math.exp((self.water_heat_ratio_slope*Tes_previous))
-            previous_evaporative_heat_loss = (self.water_loss_intercept*math.exp((self.water_loss_slope*Tes_previous)))/1000.
-        previous_resting_metabolic_rate = previous_evaporative_heat_loss/previous_water_heat_ratio
-        previous_water_heat_balance = previous_evaporative_heat_loss - previous_resting_metabolic_rate
-        previous_energy_balance = Qgen_past + previous_water_heat_balance
-        if previous_energy_balance > 0.0 and self.energy_balance < 0.0 or previous_energy_balance < 0.0 and self.energy_balance > 0.0:
-            slope = self.energy_balance - previous_energy_balance
-            intercept = self.energy_balance - (slope * hour)
-            threshold_time = (0.0 - intercept)/slope
-            self.activity_above_water_stress = hour - threshold_time
-        elif previous_energy_balance < 0.0 and self.energy_balance < 0.0:
-            self.activity_above_water_stress = 1.0
-        else:
-            pass
-            
-    def seek_shade(self,air_temperature,ground_temperature,T_threshold,mins,maxes,day,hour,tau):
-        'a function determines where and when birds and small mammals seek microhabitats based on environmental conditions'
-        self.hS(day,hour,tau)
-        if self.scenario == 'modern':
-                ground_temperature = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                air_temperature = self.modern_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                if hour == 0:
-                    previous_ground_temperature = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(23))+(self.site*288)]
-                    previous_air_temperature = self.modern_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(23))+(self.site*288)]
-                else:
-                    previous_ground_temperature = self.modern_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour-1))+(self.site*288)]
-                    previous_air_temperature = self.modern_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour-1))+(self.site*288)]
-        elif self.scenario == 'historic':
-                ground_temperature = self.historic_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                air_temperature = self.historic_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour))+(self.site*288)]
-                if hour == 0:
-                    previous_ground_temperature = self.historic_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(23))+(self.site*288)]
-                    previous_air_temperature = self.historic_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(23))+(self.site*288)]
-                else:
-                    previous_ground_temperature = self.historic_soils.D0cm.iloc[int((int((day-15)/30) * 24) + int(hour-1))+(self.site*288)]
-                    previous_air_temperature = self.historic_soils.Tair.iloc[int((int((day-15)/30) * 24) + int(hour-1))+(self.site*288)]
-        if self.type == 'bird':
-            if self.soil_ref == 'above':
-                if air_temperature >= T_threshold:
-                    slope = air_temperature - previous_air_temperature
-                    intercept = air_temperature - (slope * hour)
-                    threshold_time = (T_threshold - intercept)/slope
-                    self.active_hours = hour - threshold_time
-                    self.S = 0.5
-                    self.soil_ref = 'below'
-                elif air_temperature < T_threshold:
-                    print('staying active1')
-                    self.S = 1.0
-                    self.active_hours = 0.0
-            elif self.soil_ref =='below':
-                if air_temperature >= T_threshold:
-                    self.S = 0.5
-                    self.soil_ref = 'below'
-                    self.active_hours = 1.0
-                elif air_temperature < T_threshold:
-                    slope = air_temperature - previous_air_temperature
-                    intercept = air_temperature - (slope * hour)
-                    threshold_time = (T_threshold - intercept)/slope
-                    self.active_hours = hour - threshold_time
-                    self.S = 1.0
-                    self.soil_ref = 'above'
-        elif self.type == 'mammal':
-            if self.activity_pattern == 'diurnal':
-                if self.daylight > 0:
-                    if ground_temperature >= T_threshold:
-                        if self.soil_ref == 'above':
-                            slope = ground_temperature - previous_ground_temperature
-                            intercept = ground_temperature - (slope * hour)
-                            threshold_time = (T_threshold - intercept)/slope
-                            self.active_hours = hour - threshold_time
-                            self.soil_ref = 'below'
-                            self.S = 0.0
-                        elif self.soil_ref == 'below':#if it's day, too hot an you're already below
-                            self.active_hours = 1.0
-                            self.S = 0.0
-                    elif ground_temperature < T_threshold:#if ground temperature is fine and the previous hour was dark
-                        if self.soil_ref == 'below' and previous_ground_temperature < T_threshold:#if you're below and the previous hour was too hot vs not
-                            self.active_hours = 0.0
-                            self.soil_ref = 'above'
-                            self.S = 1.0
-                        elif self.soil_ref == 'below' and previous_ground_temperature > T_threshold:
-                            slope = ground_temperature - previous_ground_temperature
-                            intercept = ground_temperature - (slope * hour)
-                            threshold_time = (T_threshold - intercept)/slope
-                            self.active_hours = hour - threshold_time
-                            self.soil_ref = 'above'
-                            self.S = 1.0
-                        elif self.soil_ref == 'above' and previous_ground_temperature < T_threshold:#if you're below and the previous hour was too hot vs not
-                            self.active_hours = 0.0
-                            self.soil_ref = 'above'
-                            self.S = 1.0
-                if self.daylight == 0.0:
-                    self.soil_ref = 'below'  
-                    self.active_hours = 0.0                  
-            elif self.activity_pattern == 'nocturnal':
-                if self.daylight == 0.0:
-                    if self.soil_ref == 'above':
-                        if ground_temperature >= T_threshold and previous_ground_temperature < T_threshold:
-                            slope = ground_temperature - previous_ground_temperature
-                            intercept = ground_temperature - (slope * hour)
-                            threshold_time = (T_threshold - intercept)/slope
-                            self.active_hours = hour - threshold_time
-                            self.soil_ref = 'below'
-                            self.S = 0.0
-                        elif ground_temperature >= T_threshold and previous_ground_temperature > T_threshold:
-                            self.active_hours = 1.0
-                            self.soil_ref = 'below'
-                            self.S = 0.0
-                        elif ground_temperature < T_threshold:
-                            self.soil_ref = 'above'
-                            self.active_hours = 0.0
-                            self.S = 1.0
-                    elif self.soil_ref == 'below':
-                        if ground_temperature < T_threshold and previous_ground_temperature > T_threshold:
-                            slope = ground_temperature - previous_ground_temperature
-                            intercept = ground_temperature - (slope * hour)
-                            threshold_time = (T_threshold - intercept)/slope
-                            self.active_hours = hour - threshold_time
-                            self.soil_ref = 'above'
-                            self.S = 1.0
-                        elif ground_temperature > T_threshold:
-                            self.soil_ref = 'below'
-                            self.active_hours = 1.0
-                            self.S = 0.0
-                elif self.daylight > 0.0:
-                    self.soil_ref = 'below'
-                    self.active_hours = 0.0
-                    self.S = 0.0
                                             
     def find_sun(self,day,hour,tau,sun_state):
         'a function that determines whether the sun has risen or set'
@@ -753,60 +564,69 @@ class Individual():
             elif sun_state == 'sunset':
                 if sun == 0:
                     return times[i]
+
+    def update_Tb(self,day,hour,tau):
+        sun = self.hS(day, hour, tau)
+        if sun > 0.0:
+            self.T_b = 42.0
+            self.A_radius = self.length / 2.0  # radius of length of prolate spheroid
+            self.B_radius = self.width / 2.0  # radius of width of prolate spheroid
+            self.C_radius = self.height / 2.0  # radius of height of prolate spheroid
+            self.A_radius_insulation = self.A_radius
+            self.B_radius_insulation = self.B_radius
+            self.C_radius_insulation = self.C_radius
+            self.surface_area_outer = (4 * math.pi * (((((self.A_radius_insulation * self.B_radius_insulation) ** 1.6) + ((self.A_radius_insulation * self.C_radius_insulation) ** 1.6) + ((self.B_radius_insulation * self.C_radius_insulation) ** 1.6)) / 3.0) ** (1 / 1.6)))  # *1.3
+            self.surface_area_inner = 1.23 * self.surface_area_outer
+            self.conductance_skin_insulation_dorsal = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))
+            self.conductance_skin_insulation_ventral = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))
+        else:
+            self.T_b = 39.0
+            self.A_radius = self.length / 2.0  * 0.80 # radius of length of prolate spheroid
+            self.B_radius = self.width / 2.0  * 0.80 # radius of width of prolate spheroid
+            self.C_radius = self.height / 2.0  * 0.80 # radius of height of prolate spheroid
+            self.A_radius_insulation = self.A_radius
+            self.B_radius_insulation = self.B_radius
+            self.C_radius_insulation = self.C_radius
+            self.surface_area_outer = (4 * math.pi * (((((self.A_radius_insulation * self.B_radius_insulation) ** 1.6) + ((self.A_radius_insulation * self.C_radius_insulation) ** 1.6) + ((self.B_radius_insulation * self.C_radius_insulation) ** 1.6)) / 3.0) ** (1 / 1.6)))  # *1.3
+            self.surface_area_inner = 1.23 * self.surface_area_outer
+            self.conductance_skin_insulation_dorsal = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_dorsal*(self.surface_area_outer/2.0)))
+            self.conductance_skin_insulation_ventral = ((self.conductance_skin*(self.surface_area_inner/2.0)) * (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))/((self.conductance_skin*(self.surface_area_inner/2.0)) + (self.conductance_insulation_ventral*(self.surface_area_outer/2.0)))
          
 #-----------------------------#
 #----------DEFINITIONS--------#
 #-----------------------------#
-
-def generate_mass(mass):
-    'a function can be used to assess the sensitivity of the results to mass'
-    mass_change =  random.array((random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(0,10)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(10,20)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100,random.uniform(20,30)/100))
-    masses = itertools.repeat(mass,15)
-    mass_list = masses-(masses*mass_change)
-    change = mass_change
-    mass_list = numpy.insert(mass_list,0,mass)
-    change = numpy.insert(change,0,0)
-    return mass_list,change
-
-def generate_seek():
-    'a function can be used to assess the sensitivity of the results to the temperature at which the animal seeks microhabitats'
-    seek_temperatures =  numpy.array((random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(35,40),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(30,35),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30),random.uniform(25,30)))
-    seek_temperatures = numpy.insert(seek_temperatures,0,35.0)
-    return list(seek_temperatures)
     
-def read_microclimates(Tsoil):
-        'a function reads csv files that are the outputs of NicheMapR'
-        soil_df = pandas.DataFrame()
-        list_of_Tsoil = glob.glob(Tsoil+str('*csv'))
-        for i in range(len(list_of_Tsoil)):
-            soils = pandas.read_csv(list_of_Tsoil[i])
-            soils['site'] = list_of_Tsoil[i]
-            soil_df = soil_df.append(soils)
-        soil_df['site'] = soil_df['site'].map(lambda x: x.lstrip(Tsoil).rstrip('.csv'))
-        soil_df = soil_df.drop(['Unnamed: 0'], axis = 1)
-        soil_df = soil_df[['site','JULDAY','TIME','D0cm','D2.5cm','D5cm','D10cm','D15cm','D20cm','D30cm','D50cm','D100cm','D200cm','Tair','Tair_mammals']]
-        soil_df['number'] = soil_df.site.str.extract('(\d+)',expand = False)
-        soil_df['number'] = soil_df['number'].apply(float)
-        soil_df = soil_df.sort_values(['number','JULDAY'])
-        return(soil_df)
+def read_temperature(Tair_df):
+        'a function reads a csv file to generate daily minimum and maximum air temperatures'
+        final_df = pandas.DataFrame()
+        for i in range(len(Tair_df)):
+            maxTemps = numpy.array([Tair_df['tmax1'][i] - 0.5, Tair_df['tmax1'][i], Tair_df['tmax2'][i], Tair_df['tmax3'][i], Tair_df['tmax4'][i], Tair_df['tmax5'][i], Tair_df['tmax6'][i], Tair_df['tmax7'][i], Tair_df['tmax8'][i], Tair_df['tmax9'][i], Tair_df['tmax10'][i], Tair_df['tmax11'][i], Tair_df['tmax12'][i], Tair_df['tmax12'][i]-0.5])
+            minTemps = numpy.array([Tair_df['tmin1'][i] - 0.5, Tair_df['tmin1'][i], Tair_df['tmin2'][i], Tair_df['tmin3'][i], Tair_df['tmin4'][i], Tair_df['tmin5'][i], Tair_df['tmin6'][i],Tair_df['tmin7'][i], Tair_df['tmin8'][i], Tair_df['tmin9'][i], Tair_df['tmin10'][i],Tair_df['tmin11'][i], Tair_df['tmin12'][i], Tair_df['tmin12'][i] - 0.5])
+            days = numpy.array([-16, 15, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350, 381])
+            Tmin_interpolate = sci.UnivariateSpline(days, minTemps, k=3)
+            Tmax_interpolate = sci.UnivariateSpline(days, maxTemps, k=3)
+            Tmax = Tmax_interpolate(numpy.arange(365))
+            Tmin = Tmin_interpolate(numpy.arange(365))
+            site_name = Tair_df['site'][i]
+            final_df[str(site_name)+'_Tmax'] = Tmax
+            final_df[str(site_name) + '_Tmin'] = Tmin
+        return(final_df)
 
 #--------------#
 #  DATAFRAMES  #
 #--------------#
 'See code description above for explanation'
-species = pandas.read_csv('path/endotherm_properties.csv')
-locations = pandas.read_csv('path/mammal_sites.csv')
-modern_soils = read_microclimates('path/modern_shade50/')
-historic_soils = read_microclimates('path/historic_shade50/')
-
+species = pandas.read_csv('path/bird_properties.csv')
+locations = pandas.read_csv('path/sites_Endoscape.csv')
+Tair_df = read_temperature(locations)
 
 #-----------------#
 #    SIMULATION   #
 #-----------------#
 
-def run_endotherm(site):
+def run_endotherm(species,sites,Tairs):
         'a function that coordinates with the other functions to run the full simulation'
-        hourly_results = pandas.DataFrame(columns = ['type','species','activity_pattern','site','version','climate_scenario','mass_change','seek_temperature','wind','posture','fiber_density','shade','feather_depths','orientation','shape','physiology_known', 'significant', 'elevational_preference','habitat','diet','migratory','mass','surface_area','occupancy_decline','julian_day','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_empirical','Ke_theoretical','Tb','Qgen','EHL','MHP','EHL/MHP','energy_balance','water_loss_mass','dehydration_mass','excess_proportion_of_mass_lost','excess_water','metabolic_heat_required','water_loss_required','proportion_water_loss_required','excess_metabolic_heat','Qgen_water_avg','Qgen_water_sum','Qgen_heat_avg','Qgen_heat_sum','activity_thermal_stress','activity_water_stress','water_stress','heat_stress','hr_restriction'])
+        hourly_results = pandas.DataFrame(columns = ['type','species','feather_phenotype','mass_phenotype','activity_pattern','site','wind','posture','fiber_density','shade','feather_depths','orientation','shape','mass','surface_area','doy','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_theoretical','Tb','Qgen','Cooling_costs_avg','Cooling_costs_sum','Heating_costs_avg','Heating_costs_sum'])
         windspeeds = [0.1]#[0.1,1.0,2.0,3.0]
         posture = [0.0]#for azimuth function, [-0.5,-0.25,0.0,0.25,0.5]
         fiber_density = [0.0]#for self.fiber_number, [-0.5,-0.25,0.0,0.25,0.5]
@@ -814,54 +634,43 @@ def run_endotherm(site):
         feather_depth = [0.0]#for insulation_depth, [-0.5,-0.25,0.0,0.25,0.5]
         orientation = [0.0]#for view_factor,[0.0,-0.25,-0.5,-0.75]
         shape = [0.0]#for length, [-0.5,-0.25,0.0,0.25,0.5]
-        climates = ['modern','historic']
         for spp in range(len(species)):
-            mass_list = [[species.mass[spp]],[0]]
-            for climate_scenario in range(len(climates)):
-                mins = [0]
-                maxes = [0]
-                soil_mins = [0]
-                soil_maxes = [0]
-                for each_mass in range(len(mass_list[0])):
-                    seek_temperatures = [35.0]
-                    julian_day = [106,136,167]
-                    for each_seek in range(len(seek_temperatures)):
-                        for winds in range(len(windspeeds)):
-                            for postures in range(len(posture)):
-                                for densities in range(len(fiber_density)):
-                                    for shades in range(len(shade_list)):
-                                        for depths in range(len(feather_depth)):
-                                            for orientations in range(len(orientation)):
-                                                for shapes in range(len(shape)):
-                                                    endotherm = Individual(species.type[spp],climates[climate_scenario],species.common_name[spp],locations.latitude.iloc[site],locations.longitude.iloc[site],locations.elevation.iloc[site],species.length[spp],species.width[spp],species.height[spp],species.insulation_length_dorsal[spp],species.insulation_length_ventral[spp],species.density_of_fibers[spp],species.insulation_depth_dorsal[spp],species.insulation_depth_ventral[spp],species.physiology_known[spp],species.body_temperature_min[spp],species.body_temperature_max[spp],species.lower_critical_temperature[spp],species.upper_critical_temperature[spp],mass_list[0][each_mass],species.shortwave_absorptance_dorsal[spp],species.shortwave_absorptance_ventral[spp],species.longwave_absorptance[spp],species.water_heat_ratio_slope[spp],species.water_heat_ratio_intercept[spp],species.water_loss_slope[spp],species.water_loss_intercept[spp],species.body_temperature_slope1[spp],species.body_temperature_slope2[spp],species.body_temperature_intercept[spp],0.1,posture[postures],fiber_density[densities],shade_list[shades],feather_depth[depths],orientation[orientations],mass_list[1][each_mass],species.water_threshold[spp],species.insulation_conductivity[spp],species.activity_pattern[spp],site,modern_soils,historic_soils,locations.soil.iloc[site])
-                                                    for j in range(len(julian_day)):
-                                                        for hour in numpy.arange(0,24,(1)):
-                                                            if species.physiology_known[spp] == 1.0:
-                                                                pass
-                                                            else:
-                                                                endotherm.seek_shade(endotherm.air_temp(mins,maxes,julian_day[j],hour),endotherm.ground_temp_NicheMapR(julian_day[j],hour),seek_temperatures[each_seek],mins,maxes,julian_day[j],hour,TAU)
-                                                                Tes = endotherm.standard_operative_temperature(mins,maxes,julian_day[j],hour,TAU,soil_mins,soil_maxes,windspeeds[winds])
-                                                                endotherm.update_skin_conductance(Tes)
-                                                                Tes = endotherm.standard_operative_temperature(mins,maxes,julian_day[j],hour,TAU,soil_mins,soil_maxes,windspeeds[winds])
-                                                                Srad = endotherm.hS(julian_day[j],hour,TAU)
-                                                                Rabs = endotherm.radiation_abs('dorsal',mins,maxes,julian_day[j],hour,TAU,soil_mins,soil_maxes,windspeeds[winds])
-                                                                Remi = endotherm.E_S*STEFAN_BOLTZMANN*((273.5 + endotherm.Tref)**4)
-                                                                Te = endotherm.operative_temperature(mins,maxes,julian_day[j],hour,TAU,soil_mins,soil_maxes,windspeeds[winds])
-                                                                Qgen = endotherm.Q_gen(mins,maxes,julian_day[j],hour,TAU,soil_mins,soil_maxes,windspeeds[winds])
-                                                                Ke_empirical = endotherm.calculate_empirical_body_conductance(Te)
-                                                                Ke_theoretical = endotherm.Ke_overall(mins,maxes,julian_day[j],hour,soil_mins,soil_maxes,windspeeds[winds])/abs(endotherm.T_b - Te)
-                                                                endotherm.biophysical_demand(Qgen)
-                                                                Hi_d = endotherm.convective_conductance(mins,maxes,julian_day[j],hour,soil_mins,soil_maxes,windspeeds[winds])
-                                                                Ri_d = endotherm.radiative_conductance(mins,maxes,julian_day[j],hour,soil_mins,soil_maxes)
-                                                                Ksfi_d = (endotherm.conductance_skin * endotherm.conductance_insulation_dorsal)/(endotherm.conductance_skin + endotherm.conductance_insulation_dorsal)
-                                                            dataframe = pandas.DataFrame([[species.type[spp],species.common_name[spp],endotherm.activity_pattern,endotherm.site + 1,species.version[spp],climates[climate_scenario],mass_list[0][each_mass],seek_temperatures[each_seek],windspeeds[winds],posture[postures],fiber_density[densities],shade_list[shades],feather_depth[depths],orientation[orientations],shape[shapes],species.physiology_known[spp],species.mass[spp],endotherm.surface_area_outer,julian_day[j],hour,Srad,Rabs,Remi,Tes,endotherm.Tref,endotherm.soil_ref,endotherm.dorsal_Te,Hi_d,Ri_d,endotherm.conductance_skin,endotherm.conductance_insulation_dorsal,Ksfi_d,endotherm.Ke_d,Ke_empirical,Ke_theoretical,endotherm.T_b,Qgen,endotherm.evaporative_heat_loss,endotherm.resting_metabolic_rate,endotherm.water_heat_balance,endotherm.energy_balance,endotherm.water_loss_mass,endotherm.dehydration_mass,endotherm.excess_proportion_of_mass_lost,endotherm.excess_water,endotherm.metabolic_heat_required,endotherm.water_loss_required,endotherm.proportion_water_loss_required,endotherm.excess_metabolic_heat,endotherm.Qgen_water,endotherm.Qgen_water,endotherm.Qgen_heat,endotherm.Qgen_heat,endotherm.activity_above_thermal_stress,endotherm.activity_above_water_stress,endotherm.water_stress,endotherm.heat_stress,endotherm.active_hours]],columns = ['type','species','activity_pattern','site','version','climate_scenario','mass_change','seek_temperature','wind','posture','fiber_density','shade','feather_depths','orientation','shape','physiology_known','mass','surface_area','julian_day','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_empirical','Ke_theoretical','Tb','Qgen','EHL','MHP','EHL/MHP','energy_balance','water_loss_mass','dehydration_mass','excess_proportion_of_mass_lost','excess_water','metabolic_heat_required','water_loss_required','proportion_water_loss_required','excess_metabolic_heat','Qgen_water_avg','Qgen_water_sum','Qgen_heat_avg','Qgen_heat_sum','activity_thermal_stress','activity_water_stress','water_stress','heat_stress','hr_restriction'])
-                                                            hourly_results = hourly_results.append(dataframe)
-        hourly_results.to_csv('species_output/mammal_v6_shade50/hourly_v5_standard_site'+str(site+1)+'.csv',columns=['type','species','activity_pattern','site','version','climate_scenario','mass_change','seek_temperature','wind','posture','fiber_density','shade','feather_depths','orientation','shape','physiology_known','mass','surface_area','julian_day','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_empirical','Ke_theoretical','Tb','Qgen','EHL','MHP','EHL/MHP','energy_balance','water_loss_mass','dehydration_mass','excess_proportion_of_mass_lost','excess_water','metabolic_heat_required','water_loss_required','proportion_water_loss_required','excess_metabolic_heat','Qgen_water_avg','Qgen_water_sum','Qgen_heat_avg','Qgen_heat_sum','activity_thermal_stress','activity_water_stress','water_stress','heat_stress','hr_restriction'],index = False)
+            doy = [15, 46, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350]
+            for each_site in range(len(sites)):
+                for winds in range(len(windspeeds)):
+                    for postures in range(len(posture)):
+                        for densities in range(len(fiber_density)):
+                            for shades in range(len(shade_list)):
+                                for depths in range(len(feather_depth)):
+                                    for orientations in range(len(orientation)):
+                                        for shapes in range(len(shape)):
+                                            endotherm = Individual(species.type[spp],species.common_name[spp],sites.latitude.iloc[each_site],sites.longitude.iloc[each_site],sites.elevation.iloc[each_site],species.length[spp],species.width[spp],species.height[spp],species.insulation_length_dorsal[spp],species.insulation_length_ventral[spp],species.density_of_fibers[spp],species.insulation_depth_dorsal[spp],species.insulation_depth_ventral[spp],species.physiology_known[spp],species.body_temperature_min[spp],species.body_temperature_max[spp],species.lower_critical_temperature[spp],species.upper_critical_temperature[spp],species.mass[spp],species.shortwave_absorptance_dorsal[spp],species.shortwave_absorptance_ventral[spp],species.longwave_absorptance[spp],species.water_heat_ratio_slope[spp],species.water_heat_ratio_intercept[spp],species.water_loss_slope[spp],species.water_loss_intercept[spp],species.body_temperature_slope1[spp],species.body_temperature_slope2[spp],species.body_temperature_intercept[spp],0.1,posture[postures],fiber_density[densities],shade_list[shades],feather_depth[depths],orientation[orientations],shape[0],species.water_threshold[spp],species.insulation_conductivity[spp],species.activity_pattern[spp],sites['site'][each_site],1.0)
+                                            for j in range(len(doy)):
+                                                for hour in numpy.arange(0,24,(1)):
+                                                    cloud_cover = 0.0
+                                                    Tmin = Tairs[str(sites.site[each_site])+'_Tmin']
+                                                    Tmax = Tairs[str(sites.site[each_site]) + '_Tmax']
+                                                    T_air = endotherm.Tair(Tmin,Tmax,doy[j],hour)
+                                                    T_deep = (Tmin[doy[j]] + Tmax[doy[j]])/2.0
+                                                    tau = 0.75 - (0.35 * cloud_cover)  # pg 173 in Campbell and Norman 1998
+                                                    sky_emissivity = endotherm.sky_emissivity(cloud_cover)
+                                                    T_ground = endotherm.Tground(T_air,T_deep,Tmin[doy[j]],Tmax[doy[j]],T_air,10.0,doy[j],hour,5,windspeeds[winds],cloud_cover,sky_emissivity,tau)
+                                                    endotherm.update_Tb(doy[j], hour, tau)
+                                                    Tes = endotherm.standard_operative_temperature(T_air,T_ground,doy[j],hour,TAU,windspeeds[winds],sky_emissivity,5)
+                                                    Srad = endotherm.hS(doy[j],hour,tau)
+                                                    Rabs = endotherm.radiation_abs('dorsal',T_air,T_ground,doy[j],hour,tau,windspeeds[winds],sky_emissivity)
+                                                    Remi = endotherm.E_S*STEFAN_BOLTZMANN*((273.5 + endotherm.Tref)**4)
+                                                    Te = endotherm.operative_temperature(T_air,T_ground,doy[j],hour,tau,windspeeds[winds],sky_emissivity)
+                                                    Qgen = endotherm.Q_gen(T_air,T_ground,doy[j],hour,tau,windspeeds[winds],sky_emissivity)
+                                                    Ke_theoretical = endotherm.Ke_overall(T_air,T_ground,windspeeds[winds])/abs(endotherm.T_b - Te)
+                                                    endotherm.biophysical_demand(Qgen)
+                                                    Hi_d = endotherm.convective_conductance(T_air,T_ground,windspeeds[winds])
+                                                    Ri_d = endotherm.radiative_conductance(T_air,T_ground)
+                                                    Ksfi_d = (endotherm.conductance_skin * endotherm.conductance_insulation_dorsal)/(endotherm.conductance_skin + endotherm.conductance_insulation_dorsal)
+                                                    dataframe = pandas.DataFrame([[species.type[spp],species.common_name[spp],species.feather_phenotype[spp],species.mass_phenotype[spp],endotherm.activity_pattern,sites.site[each_site],windspeeds[winds],posture[postures],fiber_density[densities],shade_list[shades],feather_depth[depths],orientation[orientations],shape[shapes],species.mass[spp],endotherm.surface_area_outer,doy[j],hour,Srad,Rabs,Remi,Tes,endotherm.Tref,endotherm.soil_ref,endotherm.dorsal_Te,Hi_d,Ri_d,endotherm.conductance_skin,endotherm.conductance_insulation_dorsal,Ksfi_d,endotherm.Ke_d,Ke_theoretical,endotherm.T_b,Qgen,endotherm.Qgen_water,endotherm.Qgen_water,endotherm.Qgen_heat,endotherm.Qgen_heat]],columns = ['type','species','feather_phenotype','mass_phenotype','activity_pattern','site','wind','posture','fiber_density','shade','feather_depths','orientation','shape','mass','surface_area','doy','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_theoretical','Tb','Qgen','Cooling_costs_avg','Cooling_costs_sum','Heating_costs_avg','Heating_costs_sum'])
+                                                    hourly_results = hourly_results.append(dataframe)
+        hourly_results.to_csv('path/hourly_thermoregulatory_costs_tb.csv',columns=['type','species','feather_phenotype','mass_phenotype','activity_pattern','site','wind','posture','fiber_density','shade','feather_depths','orientation','shape','mass','surface_area','doy','hour','Srad','Rabs','Remi','Tes','Tref','soil_ref','Te_dorsal','Hi_d','Ri_d','Ks','Kf_d','Ksfi_d','Ke_d','Ke_theoretical','Tb','Qgen','Cooling_costs_avg','Cooling_costs_sum','Heating_costs_avg','Heating_costs_sum'],index = False)
+        return hourly_results
 
-
-if __name__ == '__main__':
-    'an if statement that multiprocesses the function above to run faster'
-    pool = multiprocessing.Pool(processes = 24)
-    pool.map(run_endotherm,range(0,90,1))
-    pool.close()
-    pool.join()
+# Run Endoscape
+hourly = run_endotherm(species,locations,Tair_df)
